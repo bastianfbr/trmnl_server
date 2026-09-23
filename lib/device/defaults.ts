@@ -41,19 +41,46 @@ export function normalizeRefreshSchedule(
 	}
 	if (typeof value !== "object" || Array.isArray(value)) return null;
 	const candidate = value as Partial<RefreshSchedule>;
-	if (typeof candidate.default_refresh_rate !== "number") return null;
+	const defaultRefreshRate = coerceRefreshRate(candidate.default_refresh_rate);
+	if (defaultRefreshRate === null) return null;
 	const timeRanges = Array.isArray(candidate.time_ranges)
-		? candidate.time_ranges.filter(
-				(range): range is RefreshSchedule["time_ranges"][number] =>
-					typeof range === "object" &&
-					range !== null &&
-					typeof range.start_time === "string" &&
-					typeof range.end_time === "string" &&
-					typeof range.refresh_rate === "number",
-			)
+		? candidate.time_ranges
+				.map((range) => {
+					if (typeof range !== "object" || range === null) return null;
+					const refreshRate = coerceRefreshRate(range.refresh_rate);
+					if (
+						typeof range.start_time !== "string" ||
+						typeof range.end_time !== "string" ||
+						refreshRate === null
+					) {
+						return null;
+					}
+					return {
+						start_time: range.start_time,
+						end_time: range.end_time,
+						refresh_rate: refreshRate,
+					};
+				})
+				.filter(
+					(range): range is RefreshSchedule["time_ranges"][number] =>
+						range !== null,
+				)
 		: [];
 	return {
-		default_refresh_rate: candidate.default_refresh_rate,
+		default_refresh_rate: defaultRefreshRate,
 		time_ranges: timeRanges,
 	};
+}
+
+// Historical bug: the device edit form once stored numeric fields as raw
+// strings (e.g. "180") instead of numbers before saving refresh_schedule as
+// JSON — coerce those back so existing rows don't silently lose their whole
+// schedule.
+function coerceRefreshRate(value: unknown): number | null {
+	if (typeof value === "number") return Number.isFinite(value) ? value : null;
+	if (typeof value === "string" && value.trim() !== "") {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+	return null;
 }

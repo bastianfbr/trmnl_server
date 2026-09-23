@@ -121,11 +121,13 @@ export default function DeviceClientPage({
 		// Handle nested properties
 		if (name.includes(".")) {
 			const [parent, child] = name.split(".");
+			const parsedValue =
+				e.target.type === "number" ? Number.parseInt(value, 10) : value;
 			setEditedDevice({
 				...editedDevice,
 				[parent]: {
 					...(editedDevice[parent as keyof Device] as Record<string, unknown>),
-					[child]: value,
+					[child]: parsedValue,
 				},
 			});
 		} else {
