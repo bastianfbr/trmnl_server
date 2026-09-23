@@ -4,6 +4,32 @@ import type { RecipeModuleLoader } from "./types";
 
 export const reactRecipeLoaders: Record<string, RecipeModuleLoader> = {
 	album: () => import("../../app/(app)/recipes/screens/album/album"),
+	"birthday-menu": () =>
+		import("../../app/(app)/recipes/screens/birthday-menu/birthday-menu"),
+	"birthday-menu-apero": () =>
+		import(
+			"../../app/(app)/recipes/screens/birthday-menu-apero/birthday-menu-apero"
+		),
+	"birthday-menu-apero-columns": () =>
+		import(
+			"../../app/(app)/recipes/screens/birthday-menu-apero-columns/birthday-menu-apero-columns"
+		),
+	"birthday-menu-dessert": () =>
+		import(
+			"../../app/(app)/recipes/screens/birthday-menu-dessert/birthday-menu-dessert"
+		),
+	"birthday-menu-dessert-columns": () =>
+		import(
+			"../../app/(app)/recipes/screens/birthday-menu-dessert-columns/birthday-menu-dessert-columns"
+		),
+	"birthday-menu-drinks-columns": () =>
+		import(
+			"../../app/(app)/recipes/screens/birthday-menu-drinks-columns/birthday-menu-drinks-columns"
+		),
+	"birthday-menu-plat": () =>
+		import(
+			"../../app/(app)/recipes/screens/birthday-menu-plat/birthday-menu-plat"
+		),
 	"bitcoin-price": () =>
 		import("../../app/(app)/recipes/screens/bitcoin-price/bitcoin-price"),
 	"bitmap-patterns": () =>
@@ -21,6 +47,8 @@ export const reactRecipeLoaders: Record<string, RecipeModuleLoader> = {
 		),
 	"simple-text": () =>
 		import("../../app/(app)/recipes/screens/simple-text/simple-text"),
+	starmeteo: () =>
+		import("../../app/(app)/recipes/screens/starmeteo/starmeteo"),
 	weather: () => import("../../app/(app)/recipes/screens/weather/weather"),
 	wikipedia: () =>
 		import("../../app/(app)/recipes/screens/wikipedia/wikipedia"),
@@ -28,6 +56,13 @@ export const reactRecipeLoaders: Record<string, RecipeModuleLoader> = {
 
 export const reactRecipeSlugs = [
 	"album",
+	"birthday-menu",
+	"birthday-menu-apero",
+	"birthday-menu-apero-columns",
+	"birthday-menu-dessert",
+	"birthday-menu-dessert-columns",
+	"birthday-menu-drinks-columns",
+	"birthday-menu-plat",
 	"bitcoin-price",
 	"bitmap-patterns",
 	"calendar",
@@ -36,6 +71,7 @@ export const reactRecipeSlugs = [
 	"not-found",
 	"responsive-example",
 	"simple-text",
+	"starmeteo",
 	"weather",
 	"wikipedia",
 ] as const;
