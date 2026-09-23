@@ -18,9 +18,8 @@ pnpm typecheck        # tsc --noEmit
 pnpm generate:sql     # regenerate lib/database/sql-statements.ts from migrations/*.sql
 pnpm generate:types   # regenerate lib/database/db.d.ts from a live Postgres via kysely-codegen
 pnpm generate:recipes # regenerate lib/recipes/screens.generated.ts by scanning app/(app)/recipes/screens/
+pnpm test             # jest — unit tests under app/**/*.test.ts, lib/**/*.test.ts, utils/**/*.test.ts
 ```
-
-There is no test suite in this repo — don't invent test commands.
 
 `generate:sql` runs before both `dev` and `build`; if you add/edit a file in `migrations/`, re-run it (or just `pnpm dev`) so `lib/database/sql-statements.ts` picks up the change — that generated file is what the in-app "Initialize" button executes, not the raw `.sql` files.
 
@@ -70,6 +69,8 @@ To add a new React recipe: create `app/(app)/recipes/screens/<slug>/{<slug>.tsx,
 ### TRMNL registry proxy (`lib/trmnl/registry.ts`)
 
 Local cache-through proxy for read-only TRMNL cloud data (models, palettes, categories, ips): serves from an in-memory cache, falls back to a bundled JSON snapshot under `data/trmnl/`, and best-effort persists refreshed data back to disk. 24h TTL. Set `TRMNL_PROXY_LIVE=true` to bypass caching entirely (debugging only). If you touch this, keep the fallback chain (fresh → memory cache → disk snapshot → error) intact — it's what keeps `/api/models` etc. working when the upstream TRMNL API is unreachable.
+
+`lib/trmnl/registry.test.ts` asserts every entry in the bundled `data/trmnl/models.json` snapshot passes the model schema. Running the dev server can overwrite that file with a fresh live pull from the TRMNL API (per the "best-effort persists refreshed data back to disk" behavior above) — the live API has been observed to return `image_size_limit: null` for some newer models, which fails validation and both breaks the test and gets logged as `[registry] models: dropping invalid entry`. If `data/trmnl/models.json` shows as modified after local testing, diff it before committing — a git-clean revert (`git checkout -- data/trmnl/models.json`) is usually the right move unless you specifically intended to refresh the snapshot.
 
 ## Environment & renderers
 
