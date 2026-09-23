@@ -54,7 +54,7 @@ This is the core of the app and the part most likely to need changes.
    - `takumi` (default) — fast Rust-backed Satori-compatible renderer.
    - `satori` — original Vercel Satori renderer; only one that supports the custom `dither-*` Tailwind classes.
    - `browser` — headless Chrome via `puppeteer-core`, needed for pixel-perfect TRMNL Framework UI parity; requires `docker-compose.browser.yml` or a reachable `BROWSER_URL` Chrome DevTools endpoint (see `lib/recipes/chrome-pool.ts` / `html-screenshot.ts`).
-5. PNG → 1-bit BMP conversion happens via `utils/render-bmp.ts` (Floyd-Steinberg dithering by default), producing the 800×480 1-bit BMP with TRMNL-specific header that devices expect.
+5. PNG → device-palette BMP conversion happens via `lib/render/device-image.ts` (orchestration) → `lib/render/device-image-prep.ts` (resize/palette-reduce) → `lib/render/palette-reduction.ts` (Floyd-Steinberg dithering by default), producing the 800×480 1-bit BMP with TRMNL-specific header that devices expect.
 6. `RecipeDefinition.paramsSchema` (Zod) drives the user-configurable params form (resolved per-device via `app/actions/screens-params.ts`); `dataSchema` describes what `Component` actually renders against (equal to `paramsSchema` for recipes with no fetch). `meta.renderSettings` supports `supersample` (2x render then downscale for sharper text — the old `doubleSizeForSharperText` name) and `imageDither`/`applyEdgeSnap`.
 
 To add a new React recipe: create `app/(app)/recipes/screens/<slug>/{<slug>.tsx, getData.ts}` where `<slug>.tsx` exports `paramsSchema`, `dataSchema`, and `definition`, then run `pnpm generate:recipes` (or `pnpm dev`) to pick it up. See `docs/recipes.md` for the full schema and responsive/dither authoring notes.
@@ -74,6 +74,23 @@ Local cache-through proxy for read-only TRMNL cloud data (models, palettes, cate
 ## Environment & renderers
 
 Full variable list is in `.env.example`; see `README.md`'s "Variables d'environnement" table for the summary (`DATABASE_URL`, `AUTH_ENABLED`, `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL`, `ADMIN_EMAIL`, `REACT_RENDERER`, `ENABLE_EXTERNAL_CATALOG`). The `browser` renderer needs either the `docker-compose.browser.yml` overlay or a `BROWSER_URL` pointing at a Chrome DevTools endpoint.
+
+## Staying in sync with upstream (`usetrmnl/byos_next`)
+
+This repo tracks `main` at version 0.2.15 as of 2026-09-23, rebuilt directly on top of `usetrmnl/byos_next`'s history (previously this repo had started from a disconnected local clone with no shared git history, which made every future upstream update a full add/add conflict on nearly every file — see the "chore: rebuild fork on upstream byos_next 0.2.15" commit for the full story). Because `main` now descends from a real upstream commit, ordinary Git merges work going forward:
+
+```bash
+git remote add upstream https://github.com/usetrmnl/byos_next.git   # once per clone — not stored in the repo, only in local .git/config
+git fetch upstream
+git merge upstream/main   # or: git rebase upstream/main
+```
+
+Local-only customizations that a merge may need to reconcile (keep this list current):
+- `app/(app)/recipes/screens/birthday-menu*` and `app/(app)/recipes/screens/starmeteo/` — personal recipes, safe to keep as-is on conflict.
+- `README.md`, `CLAUDE.md` — customized docs; prefer keeping local content, manually re-applying any upstream doc fixes that matter.
+- Everything else should resolve to upstream's version on conflict — this fork does not otherwise diverge from upstream on purpose.
+
+After merging, always re-run `pnpm generate:sql`, `pnpm generate:recipes`, `pnpm typecheck`, `pnpm lint`, and `pnpm build` before trusting the result, and check `migrations/` for new files that need applying against the live database (via the in-app "Initialize" button) before deploying.
 
 ## Notable non-obvious conventions
 
