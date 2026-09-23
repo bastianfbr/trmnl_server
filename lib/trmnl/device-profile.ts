@@ -8,41 +8,43 @@
  * don't drift from upstream.
  */
 
+import { resolveCompatiblePaletteId } from "./profile-resolution";
+import { findModel, findPalette } from "./registry";
 import {
-	findModel,
-	findPalette,
+	DEFAULT_MODEL_NAME,
+	type DeviceProfile,
 	type TrmnlModel,
-	type TrmnlPalette,
-} from "./registry";
+} from "./types";
 
-export const DEFAULT_MODEL_NAME = "og_plus";
-
-export type DeviceProfile = {
-	model: TrmnlModel;
-	palette: TrmnlPalette | null;
-	/** True when we couldn't resolve the requested model and fell back. */
-	fallback: boolean;
-};
+export { DEFAULT_MODEL_NAME, type DeviceProfile };
 
 /**
- * Minimal TrmnlModel used when the registry lookup fails entirely (e.g. cold
- * start with no bundled snapshot AND no upstream connectivity). Keeps the
- * renderer working in the worst case.
+ * Firmware-accurate image size budgets.
+ *
+ * The device firmware (`include/config.h`, `MAX_IMAGE_SIZE`) allocates the
+ * receive buffer per board class:
+ *   - X-class boards (ESP32-S3 + PSRAM, e.g. TRMNL X): 750000 bytes
+ *   - every other board:                                 90000 bytes
+ *
+ * TRMNL's model registry ships a generic ~92160 default for almost every model
+ * (even 2880x2160 panels), so it under-reports the real budget for high-res
+ * X-class panels. A 1872x1404 gray-16 screen legitimately exceeds 90KB while
+ * still being well within the X's 750KB buffer. Override the known X-class
+ * models so our size-limit check reflects what the hardware accepts instead of
+ * falsely flagging valid images. Keyed by registry model `name`.
  */
-const HARDCODED_FALLBACK_MODEL: TrmnlModel = {
-	name: DEFAULT_MODEL_NAME,
-	label: "TRMNL OG (fallback)",
-	width: 800,
-	height: 480,
-	colors: 4,
-	bit_depth: 2,
-	scale_factor: 1,
-	rotation: 0,
-	mime_type: "image/png",
-	offset_x: 0,
-	offset_y: 0,
-	palette_ids: ["bw", "gray-4"],
-};
+const X_CLASS_IMAGE_SIZE_LIMIT = 750_000;
+const X_CLASS_MODEL_NAMES = new Set<string>(["v2"]);
+
+function applyFirmwareImageSizeLimit(model: TrmnlModel): TrmnlModel {
+	if (!X_CLASS_MODEL_NAMES.has(model.name)) {
+		return model;
+	}
+	if (model.image_size_limit === X_CLASS_IMAGE_SIZE_LIMIT) {
+		return model;
+	}
+	return { ...model, image_size_limit: X_CLASS_IMAGE_SIZE_LIMIT };
+}
 
 /**
  * Resolve the render profile for a device.
@@ -56,20 +58,21 @@ export async function getDeviceProfile(
 ): Promise<DeviceProfile> {
 	const requested = modelName?.trim() || DEFAULT_MODEL_NAME;
 	let model = await findModel(requested);
-	let fallback = false;
-
-	if (!model && requested !== DEFAULT_MODEL_NAME) {
+	if (!model) {
 		model = await findModel(DEFAULT_MODEL_NAME);
-		fallback = true;
 	}
 	if (!model) {
-		model = HARDCODED_FALLBACK_MODEL;
-		fallback = true;
+		throw new Error(
+			`Unknown TRMNL model: ${requested}; default ${DEFAULT_MODEL_NAME} is unavailable`,
+		);
+	}
+	model = applyFirmwareImageSizeLimit(model);
+
+	const desiredPaletteId = resolveCompatiblePaletteId(model, paletteOverride);
+	const palette = desiredPaletteId ? await findPalette(desiredPaletteId) : null;
+	if (desiredPaletteId && !palette) {
+		throw new Error(`Unknown TRMNL palette: ${desiredPaletteId}`);
 	}
 
-	const desiredPaletteId =
-		paletteOverride?.trim() || model.palette_ids[0] || null;
-	const palette = desiredPaletteId ? await findPalette(desiredPaletteId) : null;
-
-	return { model, palette, fallback };
+	return { model, palette };
 }

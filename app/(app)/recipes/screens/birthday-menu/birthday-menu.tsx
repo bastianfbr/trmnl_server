@@ -1,24 +1,46 @@
+import { z } from "zod";
+import {
+	DEFAULT_IMAGE_HEIGHT,
+	DEFAULT_IMAGE_WIDTH,
+} from "@/lib/recipes/constants";
+import type { RecipeDefinition } from "@/lib/recipes/types";
 import { PreSatori } from "@/utils/pre-satori";
+
+export const paramsSchema = z.object({
+	mode: z
+		.string()
+		.default("apero")
+		.describe("Sélectionner 'apero', 'plat' ou 'dessert'")
+		.meta({ title: "Mode du Menu" }),
+	sisterName: z
+		.string()
+		.default("Justine")
+		.describe("Prénom de la personne fêtée")
+		.meta({ title: "Prénom" }),
+	age: z.number().default(30).describe("Âge célébré").meta({ title: "Âge" }),
+	title: z
+		.string()
+		.default("")
+		.describe("Laisser vide pour utiliser le titre par défaut du mode")
+		.meta({ title: "Titre du Menu" }),
+	item1: z.string().default("").meta({ title: "Plat 1 (Optionnel)" }),
+	item2: z.string().default("").meta({ title: "Plat 2 (Optionnel)" }),
+	item3: z.string().default("").meta({ title: "Plat 3 (Optionnel)" }),
+	item4: z.string().default("").meta({ title: "Plat 4 (Optionnel)" }),
+	item5: z.string().default("").meta({ title: "Plat 5 (Optionnel)" }),
+});
+
+export type BirthdayMenuParams = z.infer<typeof paramsSchema>;
 
 interface BirthdayMenuProps {
 	width?: number;
 	height?: number;
-	params?: {
-		mode?: string;
-		sisterName?: string;
-		age?: number;
-		title?: string;
-		item1?: string;
-		item2?: string;
-		item3?: string;
-		item4?: string;
-		item5?: string;
-	};
+	params?: Partial<BirthdayMenuParams>;
 }
 
-export default function BirthdayMenu({
-	width = 800,
-	height = 480,
+export function BirthdayMenu({
+	width = DEFAULT_IMAGE_WIDTH,
+	height = DEFAULT_IMAGE_HEIGHT,
 	params,
 }: BirthdayMenuProps) {
 	// Parse the mode with a robust fallback
@@ -109,7 +131,7 @@ export default function BirthdayMenu({
 	};
 
 	return (
-		<PreSatori useDoubling={true} width={width} height={height}>
+		<PreSatori width={width} height={height}>
 			<div className="w-full h-full p-3 bg-white flex flex-col items-center justify-center text-black font-inter">
 				{/* Outer heavy border */}
 				<div
@@ -177,3 +199,25 @@ export default function BirthdayMenu({
 		</PreSatori>
 	);
 }
+
+export const definition: RecipeDefinition<typeof paramsSchema> = {
+	meta: {
+		slug: "birthday-menu",
+		title: "Birthday Menu",
+		description:
+			"A beautiful customizable birthday menu recipe screen, ideal for displaying on dinner/aperitif tables.",
+		published: true,
+		tags: ["menu", "birthday", "party", "customizable"],
+		author: { name: "Antigravity", github: "" },
+		category: "display-components",
+		version: "0.1.0",
+		createdAt: "2026-06-29T12:00:00Z",
+		updatedAt: "2026-06-29T12:00:00Z",
+		renderSettings: { supersample: true },
+	},
+	paramsSchema,
+	dataSchema: paramsSchema,
+	Component: ({ width, height, params }) => (
+		<BirthdayMenu width={width} height={height} params={params} />
+	),
+};

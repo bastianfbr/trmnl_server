@@ -1,9 +1,8 @@
 "use client";
 
-import { RefreshCw, Search } from "lucide-react";
-import Image from "next/image";
+import { RefreshCw, Search, Trash2 } from "lucide-react";
 import type React from "react";
-import { DeviceFrame } from "@/components/common/device-frame";
+import { type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Command,
@@ -30,36 +29,38 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+	DEFAULT_DEVICE_SCREEN,
+	UI_REFRESH_FALLBACK_SECONDS,
+} from "@/lib/device/defaults";
 import { DeviceDisplayMode } from "@/lib/mixup/constants";
+import { getFirstPlaylistScreenId } from "@/lib/playlists/playlist-items";
 import {
 	DEFAULT_IMAGE_HEIGHT,
 	DEFAULT_IMAGE_WIDTH,
 } from "@/lib/recipes/constants";
-import type { Device, Mixup, Playlist } from "@/lib/types";
+import { type DeviceSizePreset } from "@/lib/trmnl/device-presets";
+import { resolveDeviceProfileFromCatalog } from "@/lib/trmnl/device-profile-client";
+import type { TrmnlModel, TrmnlPalette } from "@/lib/trmnl/types";
+import type { Device, Mixup, Playlist, PlaylistItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatTimezone, timezones } from "@/utils/helpers";
-
-const DEVICE_SIZE_PRESETS = {
-	"800x480": { width: 800, height: 480 },
-	"1872x1404": { width: 1872, height: 1404 },
-	custom: null,
-} as const;
-
-type DeviceSizePreset = keyof typeof DEVICE_SIZE_PRESETS;
+import { DeviceEditPreview } from "./device-edit-preview";
 
 interface DeviceEditFormProps {
 	editedDevice: Device & { status?: string; type?: string };
 	availableScreens: { id: string; title: string }[];
 	availablePlaylists: Playlist[];
+	playlistItems: PlaylistItem[];
 	availableMixups: Mixup[];
+	trmnlModels: TrmnlModel[];
+	trmnlPalettes: TrmnlPalette[];
 	deviceSizePreset: DeviceSizePreset;
 	apiKeyError: string | null;
 	friendlyIdError: string | null;
 	isSaving: boolean;
 	onInputChange: (
-		e: React.ChangeEvent<
-			HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-		>,
+		e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
 	) => void;
 	onNestedInputChange: (path: string, value: string) => void;
 	onSelectChange: (name: string, value: string) => void;
@@ -69,37 +70,19 @@ interface DeviceEditFormProps {
 	onRegenerateApiKey: () => void;
 	onRegenerateFriendlyId: () => void;
 	onAddTimeRange: () => void;
-	onSubmit: (e: React.FormEvent) => void;
+	onRemoveTimeRange: (index: number) => void;
+	onSubmit: (e: React.SubmitEvent) => void;
 	onCancel: () => void;
-}
-
-const getGrayscaleLevels = (grayscale: number | null | undefined): number => {
-	if (grayscale === 2 || grayscale === 4 || grayscale === 16) return grayscale;
-	return 2;
-};
-
-function PanelHeader({
-	label,
-	right,
-}: {
-	label: string;
-	right?: React.ReactNode;
-}) {
-	return (
-		<div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-4 py-2">
-			<h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-				{label}
-			</h3>
-			{right}
-		</div>
-	);
 }
 
 export default function DeviceEditForm({
 	editedDevice,
 	availableScreens,
 	availablePlaylists,
+	playlistItems,
 	availableMixups,
+	trmnlModels,
+	trmnlPalettes,
 	deviceSizePreset,
 	apiKeyError,
 	friendlyIdError,
@@ -113,89 +96,37 @@ export default function DeviceEditForm({
 	onRegenerateApiKey,
 	onRegenerateFriendlyId,
 	onAddTimeRange,
+	onRemoveTimeRange,
 	onSubmit,
 	onCancel: _onCancel,
 }: DeviceEditFormProps) {
-	const isPortrait = editedDevice.screen_orientation === "portrait";
-	const deviceWidth = isPortrait
-		? editedDevice.screen_height || DEFAULT_IMAGE_HEIGHT
-		: editedDevice.screen_width || DEFAULT_IMAGE_WIDTH;
-	const deviceHeight = isPortrait
-		? editedDevice.screen_width || DEFAULT_IMAGE_WIDTH
-		: editedDevice.screen_height || DEFAULT_IMAGE_HEIGHT;
-	const grayscaleLevels = getGrayscaleLevels(editedDevice.grayscale);
-
-	const isMixup =
-		editedDevice.display_mode === DeviceDisplayMode.MIXUP &&
-		!!editedDevice.mixup_id;
-	const isPlaylist =
-		editedDevice.display_mode === DeviceDisplayMode.PLAYLIST &&
-		!!editedDevice.playlist_id;
-
-	const heroSrc = isMixup
-		? `/api/bitmap/mixup/${editedDevice.mixup_id}.bmp?width=${deviceWidth}&height=${deviceHeight}&grayscale=${grayscaleLevels}`
-		: `/api/bitmap/${editedDevice?.screen || "simple-text"}.bmp?width=${deviceWidth}&height=${deviceHeight}&grayscale=${grayscaleLevels}`;
+	const {
+		savedModelName,
+		selectedModel,
+		selectedPalette,
+		selectedPaletteIds,
+		hasUnknownModel,
+	} = resolveDeviceProfileFromCatalog({
+		modelName: editedDevice.model,
+		paletteId: editedDevice.palette_id,
+		models: trmnlModels,
+		palettes: trmnlPalettes,
+	});
 
 	return (
 		<form onSubmit={onSubmit}>
 			<div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-				{/* Hero preview — left column, sticky on lg */}
-				<section className="flex flex-col overflow-hidden rounded-2xl border bg-card lg:sticky lg:top-4 lg:self-start">
-					<PanelHeader
-						label="Live preview"
-						right={
-							<span className="text-[11px] tabular-nums text-muted-foreground">
-								{deviceWidth}×{deviceHeight}px ·{" "}
-								<span className="capitalize">
-									{isPortrait ? "portrait" : "landscape"}
-								</span>{" "}
-								· {grayscaleLevels} levels
-							</span>
-						}
-					/>
-					<div className="flex flex-1 items-center justify-center bg-[radial-gradient(circle_at_50%_0%,theme(colors.muted/40),transparent_70%)] p-6">
-						{isPlaylist ? (
-							<div className="text-center text-sm text-muted-foreground">
-								Playlist mode — preview shows on the device when saved.
-							</div>
-						) : (
-							<div
-								className={cn(
-									"w-full",
-									isPortrait ? "max-w-[260px]" : "max-w-[520px]",
-								)}
-							>
-								<DeviceFrame size="lg" portrait={isPortrait}>
-									<Image
-										src={heroSrc}
-										alt="Device screen preview"
-										fill
-										className="absolute inset-0 h-full w-full object-cover"
-										style={{ imageRendering: "pixelated" }}
-										unoptimized
-									/>
-								</DeviceFrame>
-							</div>
-						)}
-					</div>
-					<div className="border-t bg-muted/20 px-4 py-3 text-xs">
-						<div className="grid gap-1.5 sm:grid-cols-3">
-							<MetaRow label="Mode">
-								<span className="capitalize">
-									{editedDevice.display_mode.toLowerCase()}
-								</span>
-							</MetaRow>
-							<MetaRow label="Timezone">
-								{editedDevice?.timezone
-									? formatTimezone(editedDevice.timezone)
-									: "—"}
-							</MetaRow>
-							<MetaRow label="Refresh">
-								{editedDevice?.refresh_schedule?.default_refresh_rate || 300}s
-							</MetaRow>
-						</div>
-					</div>
-				</section>
+				<DeviceEditPreview
+					editedDevice={editedDevice}
+					selectedModel={selectedModel}
+					selectedPalette={selectedPalette}
+					hasUnknownModel={hasUnknownModel}
+					savedModelName={savedModelName}
+					playlistScreen={getFirstPlaylistScreenId(
+						playlistItems,
+						editedDevice.playlist_id,
+					)}
+				/>
 
 				{/* Form — right column with tabs */}
 				<section className="overflow-hidden rounded-2xl border bg-card">
@@ -306,6 +237,7 @@ export default function DeviceEditForm({
 																	<CommandItem
 																		key={tz.value}
 																		value={tz.value}
+																		keywords={[tz.label, tz.region]}
 																		onSelect={() =>
 																			onSelectChange("timezone", tz.value)
 																		}
@@ -369,7 +301,7 @@ export default function DeviceEditForm({
 											)
 										}
 									>
-										<SelectTrigger className="w-full">
+										<SelectTrigger id="playlist" className="w-full">
 											<SelectValue placeholder="Select playlist…" />
 										</SelectTrigger>
 										<SelectContent>
@@ -396,7 +328,7 @@ export default function DeviceEditForm({
 											onSelectChange("mixup_id", value === "none" ? "" : value)
 										}
 									>
-										<SelectTrigger className="w-full">
+										<SelectTrigger id="mixup" className="w-full">
 											<SelectValue placeholder="Select mixup…" />
 										</SelectTrigger>
 										<SelectContent>
@@ -415,19 +347,16 @@ export default function DeviceEditForm({
 								<Field
 									label="Screen component"
 									htmlFor="screen"
-									hint="If unset, the default screen will be used."
+									hint={`Default selection is ${DEFAULT_DEVICE_SCREEN}.`}
 								>
 									<Select
 										value={editedDevice?.screen || ""}
-										onValueChange={(value) =>
-											onScreenChange(value === "none" ? null : value)
-										}
+										onValueChange={(value) => onScreenChange(value)}
 									>
-										<SelectTrigger className="w-full">
+										<SelectTrigger id="screen" className="w-full">
 											<SelectValue placeholder="Select screen…" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="none">None (use default)</SelectItem>
 											{availableScreens.map((screen) => (
 												<SelectItem key={screen.id} value={screen.id}>
 													{screen.title}
@@ -440,6 +369,60 @@ export default function DeviceEditForm({
 						</TabsContent>
 
 						<TabsContent value="display" className="mt-4 space-y-4">
+							<Field
+								label="Device model"
+								htmlFor="model"
+								hint="Determines output format, dimensions, and available palettes."
+							>
+								<Select
+									value={selectedModel?.name || ""}
+									onValueChange={(value) => onSelectChange("model", value)}
+								>
+									<SelectTrigger id="model" className="w-full">
+										<SelectValue placeholder="Select model…" />
+									</SelectTrigger>
+									<SelectContent>
+										{trmnlModels.map((model) => (
+											<SelectItem key={model.name} value={model.name}>
+												{model.label} · {model.width}×{model.height} ·{" "}
+												{model.mime_type.replace("image/", "")}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</Field>
+
+							{selectedPaletteIds.length > 0 && (
+								<Field
+									label="Palette"
+									htmlFor="palette_id"
+									hint="Restricted to palettes declared by the selected model."
+								>
+									<Select
+										value={selectedPalette?.id || selectedPaletteIds[0]}
+										onValueChange={(value) =>
+											onSelectChange("palette_id", value)
+										}
+									>
+										<SelectTrigger id="palette_id" className="w-full">
+											<SelectValue placeholder="Select palette…" />
+										</SelectTrigger>
+										<SelectContent>
+											{selectedPaletteIds.map((paletteId) => {
+												const palette = trmnlPalettes.find(
+													(item) => item.id === paletteId,
+												);
+												return (
+													<SelectItem key={paletteId} value={paletteId}>
+														{palette?.name ?? paletteId}
+													</SelectItem>
+												);
+											})}
+										</SelectContent>
+									</Select>
+								</Field>
+							)}
+
 							<Field label="Device size" htmlFor="device_size_preset">
 								<Select
 									value={deviceSizePreset}
@@ -447,7 +430,7 @@ export default function DeviceEditForm({
 										onDeviceSizePresetChange(value as DeviceSizePreset)
 									}
 								>
-									<SelectTrigger className="w-full">
+									<SelectTrigger id="device_size_preset" className="w-full">
 										<SelectValue placeholder="Select device size…" />
 									</SelectTrigger>
 									<SelectContent>
@@ -504,7 +487,7 @@ export default function DeviceEditForm({
 										onSelectChange("screen_orientation", value)
 									}
 								>
-									<SelectTrigger className="w-full">
+									<SelectTrigger id="screen_orientation" className="w-full">
 										<SelectValue placeholder="Select orientation…" />
 									</SelectTrigger>
 									<SelectContent>
@@ -514,24 +497,27 @@ export default function DeviceEditForm({
 								</Select>
 							</Field>
 
-							<Field
-								label="Grayscale levels"
-								hint="Number of gray levels for image rendering."
-							>
-								<ToggleGroup
-									type="single"
-									value={String(grayscaleLevels)}
-									onValueChange={(value) => {
-										if (value) onSelectChange("grayscale", value);
-									}}
-									variant="outline"
-									className="grid w-fit grid-cols-3"
+							{editedDevice.supports_temperature_profile && (
+								<Field
+									label="Temperature profile"
+									hint="Try A then B if the display looks washed out."
 								>
-									<ToggleGroupItem value="2">2</ToggleGroupItem>
-									<ToggleGroupItem value="4">4</ToggleGroupItem>
-									<ToggleGroupItem value="16">16</ToggleGroupItem>
-								</ToggleGroup>
-							</Field>
+									<ToggleGroup
+										type="single"
+										value={editedDevice.temperature_profile ?? "default"}
+										onValueChange={(value) => {
+											if (value) onSelectChange("temperature_profile", value);
+										}}
+										variant="outline"
+										className="grid w-fit grid-cols-4"
+									>
+										<ToggleGroupItem value="default">Default</ToggleGroupItem>
+										<ToggleGroupItem value="a">A</ToggleGroupItem>
+										<ToggleGroupItem value="b">B</ToggleGroupItem>
+										<ToggleGroupItem value="c">C</ToggleGroupItem>
+									</ToggleGroup>
+								</Field>
+							)}
 						</TabsContent>
 
 						<TabsContent value="refresh" className="mt-4 space-y-4">
@@ -545,7 +531,8 @@ export default function DeviceEditForm({
 									name="refresh_schedule.default_refresh_rate"
 									type="number"
 									value={
-										editedDevice?.refresh_schedule?.default_refresh_rate || 300
+										editedDevice?.refresh_schedule?.default_refresh_rate ||
+										UI_REFRESH_FALLBACK_SECONDS
 									}
 									onChange={onInputChange}
 								/>
@@ -576,7 +563,10 @@ export default function DeviceEditForm({
 									<div className="divide-y rounded-lg border">
 										{editedDevice.refresh_schedule.time_ranges.map(
 											(range, index) => (
-												<div key={index} className="grid grid-cols-3 gap-2 p-3">
+												<div
+													key={index}
+													className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 p-3"
+												>
 													<div className="space-y-1">
 														<Label
 															htmlFor={`start_time_${index}`}
@@ -634,6 +624,18 @@ export default function DeviceEditForm({
 															}
 														/>
 													</div>
+													<div className="flex items-end">
+														<Button
+															type="button"
+															variant="ghost"
+															size="icon"
+															className="text-muted-foreground hover:text-destructive"
+															aria-label={`Remove time range ${index + 1}`}
+															onClick={() => onRemoveTimeRange(index)}
+														>
+															<Trash2 className="h-4 w-4" />
+														</Button>
+													</div>
 												</div>
 											),
 										)}
@@ -663,7 +665,7 @@ function Field({
 	htmlFor?: string;
 	hint?: string;
 	error?: string | null;
-	children: React.ReactNode;
+	children: ReactNode;
 }) {
 	return (
 		<div className="space-y-1.5">
@@ -675,23 +677,6 @@ function Field({
 				<p className="text-[11px] text-muted-foreground">{hint}</p>
 			)}
 			{error && <p className="text-[11px] text-destructive">{error}</p>}
-		</div>
-	);
-}
-
-function MetaRow({
-	label,
-	children,
-}: {
-	label: string;
-	children: React.ReactNode;
-}) {
-	return (
-		<div className="flex flex-col gap-0.5">
-			<span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-				{label}
-			</span>
-			<span className="truncate text-sm font-medium">{children}</span>
 		</div>
 	);
 }

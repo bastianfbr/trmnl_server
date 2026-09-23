@@ -2,19 +2,29 @@
 
 import { Pencil, RefreshCw, Save, X } from "lucide-react";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fetchDeviceByFriendlyId, updateDevice } from "@/app/actions/device";
 import { PageTemplate } from "@/components/common/page-template";
-import { StatusIndicator } from "@/components/common/status-indicator";
 import DeviceEditForm from "@/components/device/device-edit-form";
 import DeviceView from "@/components/device/device-view";
 import DeviceLogsContainer from "@/components/device-logs/device-logs-container";
 import { Button } from "@/components/ui/button";
+import { UI_REFRESH_FALLBACK_SECONDS } from "@/lib/device/defaults";
+import {
+	getPlaylistScreens,
+	type PlaylistScreen,
+} from "@/lib/playlists/playlist-items";
 import {
 	DEFAULT_IMAGE_HEIGHT,
 	DEFAULT_IMAGE_WIDTH,
 } from "@/lib/recipes/constants";
+import {
+	DEVICE_SIZE_PRESETS,
+	type DeviceSizePreset,
+	detectDeviceSizePreset,
+} from "@/lib/trmnl/device-presets";
+import type { TrmnlModel, TrmnlPalette } from "@/lib/trmnl/types";
 import type { Device, Mixup, Playlist, PlaylistItem } from "@/lib/types";
 import {
 	generateApiKey,
@@ -24,21 +34,14 @@ import {
 	isValidFriendlyId,
 } from "@/utils/helpers";
 
-// Device size presets
-const DEVICE_SIZE_PRESETS = {
-	"800x480": { width: 800, height: 480 },
-	"1872x1404": { width: 1872, height: 1404 },
-	custom: null,
-} as const;
-
-type DeviceSizePreset = keyof typeof DEVICE_SIZE_PRESETS;
-
 interface DeviceClientPageProps {
 	initialDevice: Device & { status?: string; type?: string };
 	availableScreens: { id: string; title: string }[];
 	availablePlaylists: Playlist[];
 	availableMixups: Mixup[];
 	playlistItems: PlaylistItem[];
+	trmnlModels: TrmnlModel[];
+	trmnlPalettes: TrmnlPalette[];
 }
 
 export default function DeviceClientPage({
@@ -47,6 +50,8 @@ export default function DeviceClientPage({
 	availablePlaylists,
 	availableMixups,
 	playlistItems,
+	trmnlModels,
+	trmnlPalettes,
 }: DeviceClientPageProps) {
 	const [device, setDevice] = useState<
 		Device & { status?: string; type?: string }
@@ -55,14 +60,23 @@ export default function DeviceClientPage({
 	const [editedDevice, setEditedDevice] = useState<
 		Device & { status?: string; type?: string }
 	>(JSON.parse(JSON.stringify(initialDevice)));
-	const [playlistScreens, setPlaylistScreens] = useState<
-		{ screen: string; duration: number }[]
-	>([]);
+	const [playlistScreens, setPlaylistScreens] = useState<PlaylistScreen[]>([]);
 	const [isSaving, setIsSaving] = useState(false);
 
 	// State for validation error messages
 	const [apiKeyError, setApiKeyError] = useState<string | null>(null);
 	const [friendlyIdError, setFriendlyIdError] = useState<string | null>(null);
+
+	// Adopt fresh server data (e.g. from the dashboard auto-refresh) without
+	// clobbering in-progress edits. Keyed on `initialDevice` only so toggling
+	// edit mode off after a save doesn't re-apply a now-stale prop.
+	const isEditingRef = useRef(isEditing);
+	isEditingRef.current = isEditing;
+	useEffect(() => {
+		if (isEditingRef.current) return;
+		setDevice(initialDevice);
+		setEditedDevice(JSON.parse(JSON.stringify(initialDevice)));
+	}, [initialDevice]);
 
 	// State for device size preset
 	const [deviceSizePreset, setDeviceSizePreset] = useState<DeviceSizePreset>(
@@ -70,10 +84,7 @@ export default function DeviceClientPage({
 			const width = editedDevice.screen_width || DEFAULT_IMAGE_WIDTH;
 			const height = editedDevice.screen_height || DEFAULT_IMAGE_HEIGHT;
 
-			// Check if current dimensions match a preset
-			if (width === 800 && height === 480) return "800x480";
-			if (width === 1872 && height === 1404) return "1872x1404";
-			return "custom";
+			return detectDeviceSizePreset(width, height);
 		},
 	);
 
@@ -177,12 +188,23 @@ export default function DeviceClientPage({
 				},
 			});
 		} else {
-			// Convert grayscale to number
-			if (name === "grayscale") {
+			if (name === "model") {
+				const model = trmnlModels.find((item) => item.name === value);
+				const nextPaletteId = model?.palette_ids[0] ?? null;
 				setEditedDevice({
 					...editedDevice,
-					[name]: Number.parseInt(value, 10),
+					model: value || null,
+					palette_id: nextPaletteId,
+					screen_width: model?.width ?? editedDevice.screen_width,
+					screen_height: model?.height ?? editedDevice.screen_height,
 				});
+				if (model?.width === 800 && model.height === 480) {
+					setDeviceSizePreset("800x480");
+				} else if (model?.width === 1872 && model.height === 1404) {
+					setDeviceSizePreset("1872x1404");
+				} else if (model) {
+					setDeviceSizePreset("custom");
+				}
 			} else {
 				setEditedDevice({
 					...editedDevice,
@@ -244,7 +266,7 @@ export default function DeviceClientPage({
 	};
 
 	// Handle form submission
-	const handleSubmit = async (e: React.FormEvent) => {
+	const handleSubmit = async (e: React.SyntheticEvent) => {
 		e.preventDefault();
 
 		// Validate API key
@@ -282,7 +304,9 @@ export default function DeviceClientPage({
 				screen_width: editedDevice.screen_width,
 				screen_height: editedDevice.screen_height,
 				screen_orientation: editedDevice.screen_orientation,
-				grayscale: editedDevice.grayscale,
+				model: editedDevice.model,
+				palette_id: editedDevice.palette_id,
+				temperature_profile: editedDevice.temperature_profile,
 			});
 
 			if (result.success) {
@@ -365,7 +389,8 @@ export default function DeviceClientPage({
 
 		const currentTimeRanges = editedDevice.refresh_schedule?.time_ranges || [];
 		const defaultRefreshRate =
-			editedDevice.refresh_schedule?.default_refresh_rate || 300;
+			editedDevice.refresh_schedule?.default_refresh_rate ||
+			UI_REFRESH_FALLBACK_SECONDS;
 
 		setEditedDevice({
 			...editedDevice,
@@ -376,16 +401,25 @@ export default function DeviceClientPage({
 		});
 	};
 
+	const handleRemoveTimeRange = (index: number) => {
+		if (!editedDevice.refresh_schedule) return;
+
+		setEditedDevice({
+			...editedDevice,
+			refresh_schedule: {
+				default_refresh_rate:
+					editedDevice.refresh_schedule.default_refresh_rate,
+				time_ranges: editedDevice.refresh_schedule.time_ranges.filter(
+					(_, currentIndex) => currentIndex !== index,
+				),
+			},
+		});
+	};
+
 	useEffect(() => {
-		if (editedDevice.playlist_id) {
-			const playlistScreens = playlistItems
-				.filter((item) => item.playlist_id === editedDevice.playlist_id)
-				.map((item) => ({
-					screen: item.screen_id,
-					duration: item.duration,
-				}));
-			setPlaylistScreens(playlistScreens);
-		}
+		setPlaylistScreens(
+			getPlaylistScreens(playlistItems, editedDevice.playlist_id),
+		);
 	}, [editedDevice.playlist_id, playlistItems]);
 
 	return (
@@ -393,20 +427,6 @@ export default function DeviceClientPage({
 			title={
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 					<h1 className="text-2xl font-bold tracking-tight">{device.name}</h1>
-					<span className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] font-medium capitalize text-muted-foreground">
-						<StatusIndicator
-							status={
-								device.status === "online" || device.status === "offline"
-									? device.status
-									: "offline"
-							}
-							size="sm"
-						/>
-						{device.status}
-					</span>
-					<span className="font-mono text-[11px] text-muted-foreground">
-						{device.friendly_id}
-					</span>
 				</div>
 			}
 			left={
@@ -454,7 +474,10 @@ export default function DeviceClientPage({
 					editedDevice={editedDevice}
 					availableScreens={availableScreens}
 					availablePlaylists={availablePlaylists}
+					playlistItems={playlistItems}
 					availableMixups={availableMixups}
+					trmnlModels={trmnlModels}
+					trmnlPalettes={trmnlPalettes}
 					deviceSizePreset={deviceSizePreset}
 					apiKeyError={apiKeyError}
 					friendlyIdError={friendlyIdError}
@@ -468,11 +491,17 @@ export default function DeviceClientPage({
 					onRegenerateApiKey={handleRegenerateApiKey}
 					onRegenerateFriendlyId={handleRegenerateFriendlyId}
 					onAddTimeRange={handleAddTimeRange}
+					onRemoveTimeRange={handleRemoveTimeRange}
 					onSubmit={handleSubmit}
 					onCancel={handleCancel}
 				/>
 			) : (
-				<DeviceView device={device} playlistScreens={playlistScreens} />
+				<DeviceView
+					device={device}
+					playlistScreens={playlistScreens}
+					trmnlModels={trmnlModels}
+					trmnlPalettes={trmnlPalettes}
+				/>
 			)}
 
 			<DeviceLogsContainer device={device} />

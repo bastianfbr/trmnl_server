@@ -278,7 +278,6 @@ byos_next/
 │       │   │   │   ├── getData.ts
 │       │   │   │   └── starmeteo.tsx
 │       │   │   └── ...
-│       │   └── screens.json       # Registre des recettes
 │       └── ...
 ├── components/                    # Composants UI partagés
 ├── lib/                           # Helpers rendering, cache, device logic
@@ -288,7 +287,6 @@ byos_next/
 ├── docs/                          # Documentation & screenshots
 │   ├── api.md
 │   └── recipes.md
-├── BYOS.md                        # README original du projet upstream
 └── docker-compose.yml
 ```
 
@@ -315,12 +313,12 @@ La galerie `/recipes` permet de parcourir et tester des écrans avant de les dé
 # 1. Créer un dossier
 mkdir app/(app)/recipes/screens/ma-recette
 
-# 2. Ajouter le composant et la logique de fetch
+# 2. Ajouter le composant (doit exporter `definition`) et la logique de fetch
 touch app/(app)/recipes/screens/ma-recette/getData.ts
 touch app/(app)/recipes/screens/ma-recette/ma-recette.tsx
 
-# 3. Enregistrer dans le catalogue
-# → Éditer app/(app)/recipes/screens.json
+# 3. Régénérer l'index (scan automatique du dossier screens/)
+pnpm generate:recipes
 ```
 
 Voir [`docs/recipes.md`](docs/recipes.md) pour la documentation complète.
@@ -332,9 +330,8 @@ Voir [`docs/recipes.md`](docs/recipes.md) pour la documentation complète.
 | Document | Contenu |
 |---|---|
 | [`docs/api.md`](docs/api.md) | Référence des endpoints HTTP et payloads |
-| [`app/recipes/README.md`](app/(app)/recipes/README.md) | Guide des recettes |
+| [`docs/recipes.md`](docs/recipes.md) | Guide des recettes |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Guide de contribution |
-| [`BYOS.md`](BYOS.md) | README original du projet upstream |
 
 ---
 

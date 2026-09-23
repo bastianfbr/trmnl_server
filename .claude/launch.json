@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "byos-next-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["pnpm@11.8.0", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

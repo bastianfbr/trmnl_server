@@ -9,19 +9,21 @@ BYOS Next (Build Your Own Server) is a self-hosted alternative to the TRMNL clou
 ## Commands
 
 ```bash
-pnpm dev              # generate:sql then next dev --turbopack
-pnpm build            # prebuild (generate:sql) then next build
+pnpm dev              # generate:sql, generate:recipes, then next dev --turbopack
+pnpm build            # prebuild (generate:sql, generate:recipes) then next build
 pnpm lint             # biome check ./app ./components ./lib ./utils ./hooks
 pnpm lint:fix         # biome check --write --unsafe (auto-fix)
 pnpm format           # biome format --write
 pnpm typecheck        # tsc --noEmit
 pnpm generate:sql     # regenerate lib/database/sql-statements.ts from migrations/*.sql
 pnpm generate:types   # regenerate lib/database/db.d.ts from a live Postgres via kysely-codegen
+pnpm generate:recipes # regenerate lib/recipes/screens.generated.ts by scanning app/(app)/recipes/screens/
+pnpm test             # jest — unit tests under app/**/*.test.ts, lib/**/*.test.ts, utils/**/*.test.ts
 ```
 
-There is no test suite in this repo — don't invent test commands.
-
 `generate:sql` runs before both `dev` and `build`; if you add/edit a file in `migrations/`, re-run it (or just `pnpm dev`) so `lib/database/sql-statements.ts` picks up the change — that generated file is what the in-app "Initialize" button executes, not the raw `.sql` files.
+
+`generate:recipes` also runs before both `dev` and `build`; it scans `app/(app)/recipes/screens/` and writes the lazy-import map in `lib/recipes/screens.generated.ts` — re-run it (or `pnpm dev`) after adding a new recipe directory so it gets picked up.
 
 Formatting uses **tabs** and **double quotes** (biome.json). Biome's `organizeImports` assist is on, so import order is auto-fixed — don't hand-tune it.
 
@@ -44,17 +46,17 @@ Devices authenticate via `ID` (MAC address) and `Access-Token` (API key) headers
 
 This is the core of the app and the part most likely to need changes.
 
-1. A recipe is either a **React recipe** (component + optional `getData.ts`, registered in `app/(app)/recipes/screens.json`) or a **Liquid recipe** (stored in the DB, TRMNL-markup based, handled by `lib/recipes/liquid-renderer.ts`).
-2. `lib/recipes/recipe-renderer.ts` is the shared entry point: `buildRecipeElement()` resolves a slug to either a React element or rendered Liquid HTML, and `renderRecipeToImage()` (used by both the preview UI and the device-facing bitmap API) turns that into PNG/BMP buffers via `renderRecipeOutputs()`.
-3. React recipe components and their `getData` fetchers are **statically imported and mapped by slug** in `recipe-renderer.ts` (`COMPONENT_IMPORTERS` / `GETDATA_IMPORTERS`) rather than dynamically `import()`-ed — this is deliberate, to avoid chunk-resolution bugs on Vercel/Turbopack. **When adding a new React recipe, you must add it to both maps in `lib/recipes/recipe-renderer.ts`, not just `screens.json`.**
+1. A recipe is either a **React recipe** (a component module under `app/(app)/recipes/screens/<slug>/<slug>.tsx` exporting a `definition: RecipeDefinition`) or a **Liquid recipe** (stored in the DB, TRMNL-markup based, handled by `lib/recipes/liquid-renderer.ts`).
+2. `lib/recipes/recipe-renderer.ts` is a thin orchestrator with two entry points, `renderRecipeToImage()` and `renderRecipeForDevice()`, both branching React vs Liquid internally. The actual work lives in `lib/recipes/registry.ts` (built-in React recipe lookup), `lib/recipes/runtime/react.ts` (params + data resolution), and `lib/recipes/render/rasterize.ts` (PNG pipeline).
+3. React recipes are **auto-discovered**: `scripts/generate-recipes-index.mjs` scans `app/(app)/recipes/screens/` for `<slug>/<slug>.tsx` files and writes a lazy `import()` map to the committed, generated `lib/recipes/screens.generated.ts` (run via `pnpm generate:recipes`, part of `prebuild`/`dev`). A recipe module must export `definition` (a `RecipeDefinition`: `meta`, `paramsSchema`/`dataSchema` as Zod schemas, optional `getData`, and `Component`) — `lib/recipes/registry.ts` throws a clear error at load time if it's missing. **There is no manual registration file to edit** — adding a recipe is just adding the directory and regenerating the index.
 4. Three renderer backends, selected by `REACT_RENDERER` env var (`lib/recipes/renderers/{takumi,satori,browser}.ts`):
    - `takumi` (default) — fast Rust-backed Satori-compatible renderer.
    - `satori` — original Vercel Satori renderer; only one that supports the custom `dither-*` Tailwind classes.
    - `browser` — headless Chrome via `puppeteer-core`, needed for pixel-perfect TRMNL Framework UI parity; requires `docker-compose.browser.yml` or a reachable `BROWSER_URL` Chrome DevTools endpoint (see `lib/recipes/chrome-pool.ts` / `html-screenshot.ts`).
-5. PNG → 1-bit BMP conversion happens via `utils/render-bmp.ts` (Floyd-Steinberg dithering by default), producing the 800×480 1-bit BMP with TRMNL-specific header that devices expect.
-6. Recipe config supports `params` (user-configurable fields resolved per-device via `app/actions/screens-params.ts`) and `renderSettings` (`doubleSizeForSharperText`, `applyEdgeSnap`).
+5. PNG → device-palette BMP conversion happens via `lib/render/device-image.ts` (orchestration) → `lib/render/device-image-prep.ts` (resize/palette-reduce) → `lib/render/palette-reduction.ts` (Floyd-Steinberg dithering by default), producing the 800×480 1-bit BMP with TRMNL-specific header that devices expect.
+6. `RecipeDefinition.paramsSchema` (Zod) drives the user-configurable params form (resolved per-device via `app/actions/screens-params.ts`); `dataSchema` describes what `Component` actually renders against (equal to `paramsSchema` for recipes with no fetch). `meta.renderSettings` supports `supersample` (2x render then downscale for sharper text — the old `doubleSizeForSharperText` name) and `imageDither`/`applyEdgeSnap`.
 
-To add a new React recipe: create `app/(app)/recipes/screens/<slug>/{<slug>.tsx, getData.ts}`, register it in `app/(app)/recipes/screens.json`, and add it to `COMPONENT_IMPORTERS` (and `GETDATA_IMPORTERS` if it fetches data) in `lib/recipes/recipe-renderer.ts`. See `docs/recipes.md` for the full config schema and responsive/dither authoring notes.
+To add a new React recipe: create `app/(app)/recipes/screens/<slug>/{<slug>.tsx, getData.ts}` where `<slug>.tsx` exports `paramsSchema`, `dataSchema`, and `definition`, then run `pnpm generate:recipes` (or `pnpm dev`) to pick it up. See `docs/recipes.md` for the full schema and responsive/dither authoring notes.
 
 ### Database & multi-tenancy (`lib/database/`)
 
@@ -68,9 +70,28 @@ To add a new React recipe: create `app/(app)/recipes/screens/<slug>/{<slug>.tsx,
 
 Local cache-through proxy for read-only TRMNL cloud data (models, palettes, categories, ips): serves from an in-memory cache, falls back to a bundled JSON snapshot under `data/trmnl/`, and best-effort persists refreshed data back to disk. 24h TTL. Set `TRMNL_PROXY_LIVE=true` to bypass caching entirely (debugging only). If you touch this, keep the fallback chain (fresh → memory cache → disk snapshot → error) intact — it's what keeps `/api/models` etc. working when the upstream TRMNL API is unreachable.
 
+`lib/trmnl/registry.test.ts` asserts every entry in the bundled `data/trmnl/models.json` snapshot passes the model schema. Running the dev server can overwrite that file with a fresh live pull from the TRMNL API (per the "best-effort persists refreshed data back to disk" behavior above) — the live API has been observed to return `image_size_limit: null` for some newer models, which fails validation and both breaks the test and gets logged as `[registry] models: dropping invalid entry`. If `data/trmnl/models.json` shows as modified after local testing, diff it before committing — a git-clean revert (`git checkout -- data/trmnl/models.json`) is usually the right move unless you specifically intended to refresh the snapshot.
+
 ## Environment & renderers
 
 Full variable list is in `.env.example`; see `README.md`'s "Variables d'environnement" table for the summary (`DATABASE_URL`, `AUTH_ENABLED`, `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL`, `ADMIN_EMAIL`, `REACT_RENDERER`, `ENABLE_EXTERNAL_CATALOG`). The `browser` renderer needs either the `docker-compose.browser.yml` overlay or a `BROWSER_URL` pointing at a Chrome DevTools endpoint.
+
+## Staying in sync with upstream (`usetrmnl/byos_next`)
+
+This repo tracks `main` at version 0.2.15 as of 2026-09-23, rebuilt directly on top of `usetrmnl/byos_next`'s history (previously this repo had started from a disconnected local clone with no shared git history, which made every future upstream update a full add/add conflict on nearly every file — see the "chore: rebuild fork on upstream byos_next 0.2.15" commit for the full story). Because `main` now descends from a real upstream commit, ordinary Git merges work going forward:
+
+```bash
+git remote add upstream https://github.com/usetrmnl/byos_next.git   # once per clone — not stored in the repo, only in local .git/config
+git fetch upstream
+git merge upstream/main   # or: git rebase upstream/main
+```
+
+Local-only customizations that a merge may need to reconcile (keep this list current):
+- `app/(app)/recipes/screens/birthday-menu*` and `app/(app)/recipes/screens/starmeteo/` — personal recipes, safe to keep as-is on conflict.
+- `README.md`, `CLAUDE.md` — customized docs; prefer keeping local content, manually re-applying any upstream doc fixes that matter.
+- Everything else should resolve to upstream's version on conflict — this fork does not otherwise diverge from upstream on purpose.
+
+After merging, always re-run `pnpm generate:sql`, `pnpm generate:recipes`, `pnpm typecheck`, `pnpm lint`, and `pnpm build` before trusting the result, and check `migrations/` for new files that need applying against the live database (via the in-app "Initialize" button) before deploying.
 
 ## Notable non-obvious conventions
 

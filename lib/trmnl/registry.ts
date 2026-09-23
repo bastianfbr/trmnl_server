@@ -14,64 +14,67 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 
 const TRMNL_API_BASE = "https://usetrmnl.com";
 const DATA_DIR = path.join(process.cwd(), "data", "trmnl");
 const TTL_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 10_000;
 
-export type RegistryResource = "models" | "palettes" | "categories" | "ips";
+export type {
+	RegistryResource,
+	TrmnlModel,
+	TrmnlPalette,
+} from "./types";
 
-export type TrmnlModel = {
-	name: string;
-	label: string;
-	description?: string;
-	width: number;
-	height: number;
-	colors: number;
-	bit_depth: number;
-	scale_factor: number;
-	rotation: number;
-	mime_type: string;
-	offset_x: number;
-	offset_y: number;
-	kind?: string;
-	palette_ids: string[];
-	preview_white_point?: string;
-	image_size_limit?: number;
-	image_upload_supported?: boolean;
-	css?: {
-		classes?: Record<string, string>;
-		variables?: Record<string, string>;
-	};
-};
+import type { RegistryResource, TrmnlModel, TrmnlPalette } from "./types";
+import { trmnlModelSchema, trmnlPaletteSchema } from "./types";
 
-export type TrmnlPalette = {
-	id: string;
-	name: string;
-	grays?: number;
-	framework_class?: string;
-	/**
-	 * Hex color list for discrete-color palettes (color-3bwr, color-4bwry,
-	 * color-6a, color-7a, …). Absent for grayscale palettes (bw, gray-4,
-	 * gray-16, gray-256) where colors are derived from `grays` count, and
-	 * for the continuous palettes color-12bit / color-24bit.
-	 */
-	colors?: string[];
-	grayscale_bit_depth?: number;
-	[key: string]: unknown;
-};
-
-type WrappedList<T> = { data: T[] };
+/**
+ * Validate a `{ data: [...] }` registry payload against `itemSchema`,
+ * returning only the entries that parse. Invalid entries are dropped and
+ * logged rather than throwing, so a single malformed item (or an upstream
+ * shape change) can't blank the whole catalog and break rendering.
+ */
+export function parseRegistryList<S extends z.ZodType>(
+	resource: RegistryResource,
+	itemSchema: S,
+	payload: unknown,
+): z.infer<S>[] {
+	const rawData = (payload as { data?: unknown } | null | undefined)?.data;
+	if (!Array.isArray(rawData)) {
+		console.warn(`[registry] ${resource}: payload has no "data" array`);
+		return [];
+	}
+	const items: z.infer<S>[] = [];
+	for (const entry of rawData) {
+		const result = itemSchema.safeParse(entry);
+		if (result.success) {
+			items.push(result.data);
+		} else {
+			console.warn(
+				`[registry] ${resource}: dropping invalid entry`,
+				result.error.issues,
+			);
+		}
+	}
+	return items;
+}
 
 export async function listModels(): Promise<TrmnlModel[]> {
-	const payload = (await getRegistry("models")) as WrappedList<TrmnlModel>;
-	return payload?.data ?? [];
+	return parseRegistryList(
+		"models",
+		trmnlModelSchema,
+		await getRegistry("models"),
+	);
 }
 
 export async function listPalettes(): Promise<TrmnlPalette[]> {
-	const payload = (await getRegistry("palettes")) as WrappedList<TrmnlPalette>;
-	return payload?.data ?? [];
+	return parseRegistryList(
+		"palettes",
+		trmnlPaletteSchema,
+		await getRegistry("palettes"),
+	);
 }
 
 export async function findModel(name: string): Promise<TrmnlModel | null> {
@@ -175,4 +178,24 @@ export async function getRegistry(
 	}
 
 	return refresh(resource);
+}
+
+/**
+ * GET handler for a registry resource. The `/api/{models,palettes,categories,
+ * ips}` routes are otherwise identical, so they share this factory.
+ */
+export function createRegistryRouteHandler(resource: RegistryResource) {
+	return async function GET(): Promise<Response> {
+		try {
+			return Response.json(await getRegistry(resource));
+		} catch (error) {
+			return Response.json(
+				{
+					error: `Failed to load ${resource} registry`,
+					message: error instanceof Error ? error.message : "Unknown error",
+				},
+				{ status: 502 },
+			);
+		}
+	};
 }

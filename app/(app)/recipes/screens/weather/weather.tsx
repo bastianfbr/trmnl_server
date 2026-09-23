@@ -1,4 +1,21 @@
+import { cloneElement, type ReactElement } from "react";
+import { z } from "zod";
+import {
+	ScreenFooter,
+	StatsGrid,
+	screenMetric,
+} from "@/components/trmnl/screen-layout";
+import {
+	DEFAULT_IMAGE_HEIGHT,
+	DEFAULT_IMAGE_WIDTH,
+} from "@/lib/recipes/constants";
+import type { RecipeDefinition } from "@/lib/recipes/types";
+import {
+	createScreenProfile,
+	type ScreenProfile,
+} from "@/lib/trmnl/screen-profile";
 import { PreSatori } from "@/utils/pre-satori";
+import getWeatherDataInternal from "./getData";
 import {
 	CloudIcon,
 	FogIcon,
@@ -16,6 +33,46 @@ import {
 	windIcon,
 } from "./icons";
 
+export const paramsSchema = z.object({
+	location: z
+		.string()
+		.default("San Francisco")
+		.describe("City or place name to fetch weather for")
+		.meta({ title: "Location", placeholder: "San Francisco" }),
+	latitude: z
+		.number()
+		.default(0)
+		.describe(
+			"Optional exact latitude; when set with longitude, skips geocoding",
+		)
+		.meta({ title: "Latitude" }),
+	longitude: z
+		.number()
+		.default(0)
+		.describe(
+			"Optional exact longitude; when set with latitude, skips geocoding",
+		)
+		.meta({ title: "Longitude" }),
+});
+
+export const dataSchema = z.object({
+	temperature: z.string().default("Loading..."),
+	feelsLike: z.string().default("Loading..."),
+	humidity: z.string().default("Loading..."),
+	windSpeed: z.string().default("Loading..."),
+	description: z.string().default("Loading..."),
+	location: z.string().default("Loading..."),
+	lastUpdated: z.string().default("Loading..."),
+	highTemp: z.string().default("Loading..."),
+	lowTemp: z.string().default("Loading..."),
+	pressure: z.string().default("Loading..."),
+	sunset: z.string().default("Loading..."),
+	sunrise: z.string().default("Loading..."),
+	latitude: z.number().default(0),
+	longitude: z.number().default(0),
+	suggestion: z.string().default(""),
+});
+
 interface WeatherProps {
 	temperature?: string;
 	feelsLike?: string;
@@ -31,8 +88,10 @@ interface WeatherProps {
 	sunrise?: string;
 	latitude?: number;
 	longitude?: number;
+	suggestion?: string;
 	width?: number;
 	height?: number;
+	screen?: ScreenProfile;
 }
 
 export default function Weather({
@@ -48,9 +107,12 @@ export default function Weather({
 	pressure = "Loading...",
 	sunset = "Loading...",
 	sunrise = "Loading...",
-	width = 800,
-	height = 480,
+	suggestion = "",
+	width = DEFAULT_IMAGE_WIDTH,
+	height = DEFAULT_IMAGE_HEIGHT,
+	screen,
 }: WeatherProps) {
+	const screenProfile = screen ?? createScreenProfile({ width, height });
 	// Weather statistics
 	const weatherStats = [
 		{ label: "Feels Like", value: `${feelsLike}°C`, icon: tempIcon },
@@ -75,62 +137,103 @@ export default function Weather({
 		return CloudIcon; // default
 	};
 
-	const isHalfScreen = width === 400 && height === 480;
+	const isHalfScreen = screenProfile.isHalfScreen;
+	// Icons are static <svg> constants and Takumi needs explicit pixel sizes
+	// (percent sizes render nothing), so scale them from logical screen metrics.
+	const sizeIcon = (icon: ReactElement, base: number) => {
+		const px = screenMetric(screenProfile, base);
+		return cloneElement(
+			icon as ReactElement<{ width?: number; height?: number }>,
+			{ width: px, height: px },
+		);
+	};
 
 	return (
-		<PreSatori width={width} height={height}>
+		<PreSatori
+			width={screenProfile.logicalWidth}
+			height={screenProfile.logicalHeight}
+		>
 			<div className="flex flex-col w-full h-full bg-white text-black">
 				<div
-					className={`flex p-4 sm:flex-row items-center justify-between ${isHalfScreen ? "flex-row" : "flex-col sm:flex-row"}`}
+					className={`flex p-4 lg:p-8 2xl:p-12 sm:flex-row items-center justify-between ${isHalfScreen ? "flex-row" : "flex-col sm:flex-row"}`}
 				>
 					<h2
-						className={`font-inter ${isHalfScreen ? "text-8xl" : "text-9xl"}`}
+						className={`font-inter leading-none ${isHalfScreen ? "text-8xl" : "text-9xl 2xl:text-[12rem]"}`}
 					>
 						{temperature}°C
 					</h2>
 					<div className="flex flex-col items-center justify-center">
-						{getWeatherIcon(description)}
+						<div className="flex items-center justify-center">
+							{sizeIcon(getWeatherIcon(description), 128)}
+						</div>
 						{!isHalfScreen && (
-							<div className="text-4xl mt-4 font-blockkie">
-								<div className="flex flex-row items-center">
-									{tempUp} {highTemp}°C
-									{tempDown} {lowTemp}°C
+							<div className="text-4xl lg:text-5xl 2xl:text-6xl mt-4 font-blockkie">
+								<div className="flex flex-row items-center gap-2">
+									{sizeIcon(tempUp, 40)} {highTemp}°C
+									{sizeIcon(tempDown, 40)} {lowTemp}°C
 								</div>
 							</div>
 						)}
 					</div>
 				</div>
-				<div className="p-4 flex flex-col flex-1">
-					<div
-						className={`w-full flex flex-col flex-1 mb-4 ${isHalfScreen ? "gap-2" : "gap-4"} grid grid-cols-2 sm:grid-cols-3`}
-					>
-						{weatherStats.map((stat, index) => (
-							<div
-								key={index}
-								className=" rounded-xl border border-black flex-1 flex flex-row items-center"
-							>
-								<div className="p-2 max-h-16">{stat.icon}</div>
-								<div className="flex flex-col sm:ml-2">
-									<div
-										className={`leading-none m-0 ${isHalfScreen ? "text-2xl" : "text-3xl"}`}
-									>
-										{stat.label}
-									</div>
-									<div
-										className={`leading-none m-0 ${isHalfScreen ? "text-2xl" : "text-3xl"}`}
-									>
-										{stat.value}
-									</div>
-								</div>
-							</div>
-						))}
-					</div>
-					<div className="w-full flex flex-col sm:flex-row  sm:justify-between items-center text-2xl text-white p-2 rounded-xl bg-gray-500">
-						<div>{location}</div>
-						<div>{lastUpdated && <span>Last updated: {lastUpdated}</span>}</div>
-					</div>
+				<div
+					className="p-4 lg:p-8 2xl:p-12 pt-0 lg:pt-0 2xl:pt-0 flex flex-col flex-1"
+					style={{ gap: screenMetric(screenProfile, isHalfScreen ? 8 : 16) }}
+				>
+					<StatsGrid
+						screen={screenProfile}
+						stats={weatherStats.map((stat) => ({
+							label: stat.label,
+							value: stat.value,
+							icon: sizeIcon(stat.icon, 48),
+						}))}
+						columns={isHalfScreen ? 2 : 3}
+						fill
+					/>
+					<ScreenFooter
+						screen={screenProfile}
+						left={suggestion || location}
+						right={
+							location
+								? `${location}${lastUpdated ? ` · ${lastUpdated}` : ""}`
+								: lastUpdated
+						}
+						style={{ backgroundColor: "#000" }}
+					/>
 				</div>
 			</div>
 		</PreSatori>
 	);
 }
+
+export const definition: RecipeDefinition<
+	typeof paramsSchema,
+	typeof dataSchema
+> = {
+	meta: {
+		slug: "weather",
+		title: "Weather Forecast",
+		description:
+			"A component that displays current weather data from Open-Meteo API. Supports configurable locations via latitude/longitude or location name.",
+		published: true,
+		tags: ["tailwind", "weather", "api", "live-data", "configurable"],
+		author: { name: "rbouteiller", github: "" },
+		category: "display-components",
+		version: "0.1.0",
+		createdAt: "2025-03-01T00:00:00Z",
+		updatedAt: "2025-03-01T00:00:00Z",
+	},
+	paramsSchema,
+	dataSchema,
+	getData: async (params) => {
+		const data = await getWeatherDataInternal({
+			location: params.location,
+			latitude: params.latitude,
+			longitude: params.longitude,
+		});
+		return data as z.infer<typeof dataSchema>;
+	},
+	Component: ({ width, height, screen, data }) => (
+		<Weather {...data} width={width} height={height} screen={screen} />
+	),
+};

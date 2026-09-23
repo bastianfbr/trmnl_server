@@ -1,18 +1,16 @@
 import yaml from "js-yaml";
 import {
-	type Context,
-	type Emitter,
 	Liquid,
 	type Parser,
 	Tag,
 	type TagToken,
-	type Template,
 	type TopLevelToken,
 } from "liquidjs";
 import { db } from "@/lib/database/db";
 import { withExplicitUserScope } from "@/lib/database/scoped-db";
 import { checkDbConnection } from "@/lib/database/utils";
-import { logger, type RecipeParamDefinitions } from "./recipe-renderer";
+import { logger } from "./logger";
+import type { RecipeParamDefinitions } from "./zod-form";
 
 const TRMNL_CSS_URL = "https://trmnl.com/css/latest/plugins.css";
 const TRMNL_JS_URL = "https://trmnl.com/js/latest/plugins.js";
@@ -39,11 +37,10 @@ type LiquidRenderResult = {
 
 /**
  * Custom liquidjs block tag for TRMNL's {% template name %}...{% endtemplate %}.
- * Simply renders its body content — the tag is organizational in TRMNL.
+ * Definition-only: partials are extracted separately into the engine's
+ * templates map, then rendered explicitly via {% render "name" %}.
  */
 class TemplateTag extends Tag {
-	private templates: Template[] = [];
-
 	constructor(
 		token: TagToken,
 		remainTokens: TopLevelToken[],
@@ -56,19 +53,16 @@ class TemplateTag extends Tag {
 			.on("tag:endtemplate", () => {
 				stream.stop();
 			})
-			.on("template", (tpl: Template) => {
-				this.templates.push(tpl);
-			})
 			.on("end", () => {
 				throw new Error("{% template %} block missing {% endtemplate %}");
 			});
 		stream.start();
 	}
 
-	*render(ctx: Context, emitter: Emitter): Generator<unknown> {
-		for (const tpl of this.templates) {
-			yield this.liquid.renderer.renderTemplates([tpl], ctx, emitter);
-		}
+	*render(): Generator<unknown> {
+		// {% template %} only DEFINES a reusable block (registered as a partial
+		// elsewhere) — it must emit nothing at definition time. Emitting here
+		// double-renders the block when a layout also {% render %}s it.
 	}
 }
 
@@ -272,6 +266,17 @@ async function fetchPollingData(
 	for (const settled of results) {
 		if (settled.status === "fulfilled" && settled.value.result !== null) {
 			data[`IDX_${settled.value.index}`] = settled.value.result;
+		}
+	}
+
+	// TRMNL contract: a single polling URL exposes its JSON keys at the root
+	// scope, so templates can reference {{ img }} directly. Only multiple URLs
+	// stay namespaced as IDX_0, IDX_1, … . IDX_0 is kept for compatibility.
+	if (urls.length === 1) {
+		const single = data.IDX_0;
+		if (single && typeof single === "object" && !Array.isArray(single)) {
+			Object.assign(data, single as Record<string, unknown>);
+			data.IDX_0 = single;
 		}
 	}
 

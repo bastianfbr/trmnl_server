@@ -3,6 +3,7 @@
 import { ArrowLeft, LayoutGrid, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DeviceFrame } from "@/components/common/device-frame";
+import { ScreenPreviewImage } from "@/components/common/screen-preview-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,6 +20,7 @@ import {
 	type LayoutSlot,
 	type MixupLayoutId,
 } from "@/lib/mixup/constants";
+import { buildBitmapPreviewSrc } from "@/lib/render/preview-image";
 import { cn } from "@/lib/utils";
 
 type MixupRecipe = {
@@ -269,18 +271,16 @@ export function MixupBuilder({
 												aria-pressed={isActive}
 											>
 												{recipe ? (
-													<picture>
-														<source
-															srcSet={`/api/bitmap/${recipe.slug}.bmp?width=${slot.width}&height=${slot.height}`}
-															type="image/bmp"
-														/>
-														<img
-															src={`/api/bitmap/${recipe.slug}.bmp`}
-															alt={`${recipe.title} preview`}
-															className="absolute inset-0 h-full w-full object-cover"
-															style={{ imageRendering: "pixelated" }}
-														/>
-													</picture>
+													<ScreenPreviewImage
+														src={buildBitmapPreviewSrc(recipe.slug, {
+															width: slot.width,
+															height: slot.height,
+														})}
+														alt={`${recipe.title} preview`}
+														width={slot.width}
+														height={slot.height}
+														className="absolute inset-0"
+													/>
 												) : (
 													<div className="absolute inset-0 flex items-center justify-center bg-muted/40 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
 														Empty
@@ -337,25 +337,33 @@ export function MixupBuilder({
 								const isActive = activeSlot === slot.id;
 
 								return (
-									<button
-										type="button"
+									<div
 										key={slot.id}
-										onClick={() => setActiveSlot(slot.id)}
 										className={cn(
-											"flex w-full items-center gap-3 px-4 py-3 text-left transition-colors",
+											"flex w-full items-start gap-3 px-4 py-3 transition-colors",
 											isActive ? "bg-primary/5" : "hover:bg-muted/40",
 										)}
 									>
-										<div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-background text-[11px] font-semibold tabular-nums text-muted-foreground">
+										<button
+											type="button"
+											onClick={() => setActiveSlot(slot.id)}
+											aria-pressed={isActive}
+											aria-label={`Activate ${slot.label}`}
+											className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-background text-[11px] font-semibold tabular-nums text-muted-foreground hover:bg-muted"
+										>
 											{index + 1}
-										</div>
+										</button>
 										<div className="min-w-0 flex-1">
-											<div className="flex items-center justify-between gap-2 text-xs">
+											<button
+												type="button"
+												onClick={() => setActiveSlot(slot.id)}
+												className="flex w-full items-center justify-between gap-2 text-left text-xs"
+											>
 												<span className="font-semibold">{slot.label}</span>
 												<span className="text-[10px] text-muted-foreground">
 													{spanLabel(slot)}
 												</span>
-											</div>
+											</button>
 											<div className="mt-1.5">
 												<Select
 													value={selectedId ?? "none"}
@@ -366,10 +374,7 @@ export function MixupBuilder({
 														)
 													}
 												>
-													<SelectTrigger
-														className="h-8 w-full text-xs"
-														onClick={(e) => e.stopPropagation()}
-													>
+													<SelectTrigger className="h-8 w-full text-xs">
 														<SelectValue placeholder="Choose recipe" />
 													</SelectTrigger>
 													<SelectContent>
@@ -388,7 +393,7 @@ export function MixupBuilder({
 												)}
 											</div>
 										</div>
-									</button>
+									</div>
 								);
 							})}
 						</div>

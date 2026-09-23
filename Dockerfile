@@ -1,4 +1,4 @@
-ARG NODE_VERSION=22
+ARG NODE_VERSION=22.22.3
 
 # Base stage - minimal Node.js only
 FROM node:${NODE_VERSION}-slim AS base
@@ -12,12 +12,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app
 
-RUN corepack enable pnpm
+RUN corepack enable pnpm && corepack prepare pnpm@11.8.0 --activate
 
 # Install dependencies only when needed
 FROM base AS deps
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile --prod=false \
     && rm -rf ~/.npm ~/.pnpm-store /root/.cache
@@ -40,6 +40,7 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV CHROME_EXECUTABLE_PATH=/headless-shell/headless-shell
+ENV XDG_CACHE_HOME=/home/nextjs/.cache
 
 # Copy Node.js binary from build stage
 COPY --from=base /usr/local/bin/node /usr/local/bin/node
@@ -52,6 +53,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-privileged user
 RUN groupadd -g 1001 nodejs \
     && useradd -u 1001 -g nodejs -s /bin/false nextjs
+
+RUN mkdir -p /var/cache/fontconfig /home/nextjs/.cache/fontconfig /home/nextjs/.fontconfig \
+    && chown -R nextjs:nodejs /var/cache/fontconfig /home/nextjs
 
 # Copy built application
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public

@@ -1,16 +1,26 @@
 import type { NextRequest } from "next/server";
-import NotFoundScreen from "@/app/(app)/recipes/screens/not-found/not-found";
+import { getCurrentUserId } from "@/lib/auth/get-user";
 import {
-	DEFAULT_IMAGE_HEIGHT,
-	DEFAULT_IMAGE_WIDTH,
-	logger,
-	renderRecipeOutputs,
-	renderRecipeToImage,
-} from "@/lib/recipes/recipe-renderer";
+	resolveDeviceProfileForRequest,
+	resolveDeviceProfileOrNull,
+} from "@/lib/device/device-profile-request";
 import {
 	parseRequestHeaders,
 	resolveUserIdFromApiKey,
-} from "../../display/utils";
+} from "@/lib/device/request-headers";
+import {
+	DEFAULT_IMAGE_HEIGHT,
+	DEFAULT_IMAGE_WIDTH,
+} from "@/lib/recipes/constants";
+import { logger } from "@/lib/recipes/logger";
+import { renderRecipeForDevice } from "@/lib/recipes/recipe-renderer";
+import { stripImageExtension } from "@/lib/render/device-image-url";
+import { renderErrorImage } from "@/lib/render/error-image";
+import {
+	parseImageRequest,
+	rejectOversizedImageArea,
+} from "@/lib/render/image-request";
+import { imageResponse } from "@/lib/render/image-response";
 
 export async function GET(
 	req: NextRequest,
@@ -19,155 +29,98 @@ export async function GET(
 	const headers = parseRequestHeaders(req);
 	try {
 		// Always await params as required by Next.js 14/15
-		const { slug = ["not-found"] } = await params;
+		const { slug = ["error"] } = await params;
 		const bitmapPath = Array.isArray(slug) ? slug.join("/") : slug;
-		const recipeSlug = bitmapPath.replace(".bmp", "");
+		const recipeSlug = stripImageExtension(bitmapPath);
 
-		// Get width, height, and grayscale from query parameters
 		const { searchParams } = new URL(req.url);
-		const widthParam = searchParams.get("width");
-		const heightParam = searchParams.get("height");
-		const grayscaleParam = searchParams.get("grayscale");
-		const formatParam = searchParams.get("format");
+		const imageRequest = parseImageRequest(searchParams);
+		if (imageRequest instanceof Response) return imageRequest;
 
-		const width = widthParam ? parseInt(widthParam, 10) : DEFAULT_IMAGE_WIDTH;
-		const height = heightParam
-			? parseInt(heightParam, 10)
-			: DEFAULT_IMAGE_HEIGHT;
+		logger.info(`Bitmap request for: ${bitmapPath}`);
 
-		// Validate width and height are positive numbers
-		const validWidth = width > 0 ? width : DEFAULT_IMAGE_WIDTH;
-		const validHeight = height > 0 ? height : DEFAULT_IMAGE_HEIGHT;
-		const grayscaleLevels = grayscaleParam ? parseInt(grayscaleParam, 10) : 2;
-
-		logger.info(
-			`Bitmap request for: ${bitmapPath} in ${validWidth}x${validHeight} with ${grayscaleLevels} gray levels (format: ${formatParam || "bmp"})`,
-		);
-
-		// Resolve the device owner so DB queries are scoped to the right user
-		const userId = headers.apiKey
+		// Devices send an Access-Token; browser previews (an <img> fetch) send the
+		// session cookie instead, so fall back to the signed-in user — otherwise
+		// user-scoped recipes are invisible and render as "Unknown recipe".
+		const apiKeyOwnerId = headers.apiKey
 			? await resolveUserIdFromApiKey(headers.apiKey)
 			: null;
+		const userId = apiKeyOwnerId ?? (await getCurrentUserId());
 
 		// Forward cookies so browser rendering can reuse the caller's auth session.
 		const cookieHeader = req.headers.get("cookie");
-
-		// If PNG format is requested, render and return a PNG immediately
-		if (formatParam === "png") {
-			const renders = await renderRecipeToImage({
-				slug: recipeSlug,
-				imageWidth: validWidth,
-				imageHeight: validHeight,
-				formats: ["png"],
-				userId,
-				cookies: cookieHeader || undefined,
-			});
-
-			if (renders.png && renders.png.length > 0) {
-				return new Response(new Uint8Array(renders.png), {
-					headers: {
-						"Content-Type": "image/png",
-						"Content-Length": renders.png.length.toString(),
-						"Cache-Control": "no-store",
-					},
-				});
-			}
-
-			return new Response("Failed to generate PNG", {
-				status: 500,
-				headers: {
-					"Content-Type": "text/plain",
-					"Cache-Control": "no-store",
-				},
-			});
-		}
-
-		const recipeBuffer = await renderRecipeBitmap(
-			recipeSlug,
-			validWidth,
-			validHeight,
-			grayscaleLevels,
-			userId,
-			cookieHeader || undefined,
-		);
-
-		if (
-			!recipeBuffer ||
-			!(recipeBuffer instanceof Buffer) ||
-			recipeBuffer.length === 0
-		) {
-			logger.warn(
-				`Failed to generate bitmap for ${recipeSlug}, returning fallback`,
-			);
-			const fallback = await renderFallbackBitmap();
-			return fallback;
-		}
-
-		return new Response(new Uint8Array(recipeBuffer), {
-			headers: {
-				"Content-Type": "image/bmp",
-				"Content-Length": recipeBuffer.length.toString(),
-				"Cache-Control": "no-store",
-			},
+		const profile = await resolveDeviceProfileForRequest(headers, {
+			modelName: imageRequest.modelName,
+			paletteId: imageRequest.paletteId,
 		});
+
+		if (recipeSlug === "error") {
+			const imageWidth = imageRequest.width ?? profile.model.width;
+			const imageHeight = imageRequest.height ?? profile.model.height;
+			const oversized = rejectOversizedImageArea(imageWidth, imageHeight);
+			if (oversized) return oversized;
+			const image = await renderErrorImage({
+				message: searchParams.get("message") ?? "Display error",
+				width: imageWidth,
+				height: imageHeight,
+				profile,
+			});
+			return imageResponse(image);
+		}
+
+		const imageWidth = imageRequest.width ?? profile.model.width;
+		const imageHeight = imageRequest.height ?? profile.model.height;
+		const oversized = rejectOversizedImageArea(imageWidth, imageHeight);
+		if (oversized) return oversized;
+
+		const image = await renderRecipeForDevice({
+			slug: recipeSlug,
+			profile,
+			width: imageWidth,
+			height: imageHeight,
+			userId,
+			cookies: cookieHeader || undefined,
+		});
+
+		if (!image?.buffer.length) {
+			logger.warn(`Failed to generate device image for ${recipeSlug}`);
+			const errorImage = await renderErrorImage({
+				message: `Could not render ${recipeSlug}`,
+				width: imageWidth,
+				height: imageHeight,
+				profile,
+			});
+			return imageResponse(errorImage, 500);
+		}
+
+		return imageResponse(image);
 	} catch (error) {
 		logger.error("Error generating image:", error);
-
-		// Instead of returning an error, return the NotFoundScreen as a fallback
-		return await renderFallbackBitmap("Error occurred");
+		const { searchParams } = new URL(req.url);
+		const imageRequest = parseImageRequest(searchParams);
+		const profile =
+			imageRequest instanceof Response
+				? null
+				: await resolveDeviceProfileOrNull(headers, {
+						modelName: imageRequest.modelName,
+						paletteId: imageRequest.paletteId,
+					});
+		const width =
+			imageRequest instanceof Response
+				? DEFAULT_IMAGE_WIDTH
+				: (imageRequest.width ?? profile?.model.width ?? DEFAULT_IMAGE_WIDTH);
+		const height =
+			imageRequest instanceof Response
+				? DEFAULT_IMAGE_HEIGHT
+				: (imageRequest.height ??
+					profile?.model.height ??
+					DEFAULT_IMAGE_HEIGHT);
+		const errorImage = await renderErrorImage({
+			message: error instanceof Error ? error.message : "Image render failed",
+			width,
+			height,
+			profile,
+		});
+		return imageResponse(errorImage, 500);
 	}
 }
-
-const renderRecipeBitmap = async (
-	recipeId: string,
-	width: number,
-	height: number,
-	grayscaleLevels: number = 2,
-	userId: string | null = null,
-	cookies?: string,
-) => {
-	const renders = await renderRecipeToImage({
-		slug: recipeId,
-		imageWidth: width,
-		imageHeight: height,
-		formats: ["bitmap"],
-		grayscale: grayscaleLevels,
-		userId,
-		cookies,
-	});
-	return renders.bitmap ?? Buffer.from([]);
-};
-
-const renderFallbackBitmap = async (slug: string = "not-found") => {
-	try {
-		const renders = await renderRecipeOutputs({
-			slug,
-			Component: NotFoundScreen,
-			props: { slug },
-			config: null,
-			imageWidth: DEFAULT_IMAGE_WIDTH,
-			imageHeight: DEFAULT_IMAGE_HEIGHT,
-			formats: ["bitmap"],
-			grayscale: 2, // Default to 2 levels for fallback
-		});
-
-		if (!renders.bitmap) {
-			throw new Error("Missing bitmap buffer for fallback");
-		}
-
-		return new Response(new Uint8Array(renders.bitmap), {
-			headers: {
-				"Content-Type": "image/bmp",
-				"Content-Length": renders.bitmap.length.toString(),
-			},
-		});
-	} catch (fallbackError) {
-		logger.error("Error generating fallback image:", fallbackError);
-		return new Response("Error generating image", {
-			status: 500,
-			headers: {
-				"Content-Type": "text/plain",
-			},
-		});
-	}
-};

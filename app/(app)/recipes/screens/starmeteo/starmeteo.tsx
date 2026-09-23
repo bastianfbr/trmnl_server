@@ -1,5 +1,37 @@
 import React from "react";
+import { z } from "zod";
+import {
+	DEFAULT_IMAGE_HEIGHT,
+	DEFAULT_IMAGE_WIDTH,
+} from "@/lib/recipes/constants";
+import type { RecipeDefinition } from "@/lib/recipes/types";
 import { PreSatori } from "@/utils/pre-satori";
+import getStarMeteoDataInternal from "./getData";
+
+export const paramsSchema = z.object({
+	location: z
+		.string()
+		.default("Paris")
+		.describe("City or place name to fetch weather for")
+		.meta({ title: "Location", placeholder: "Paris" }),
+});
+
+export const dataSchema = z.object({
+	currentMax: z.string().default("23"),
+	currentMin: z.string().default("12"),
+	currentIcon: z.string().default("sun-cloud"),
+	time: z.string().default("12:34"),
+	probeTemp: z.string().default("17.3"),
+	forecastTomorrowMax: z.string().default("20"),
+	forecastTomorrowMin: z.string().default("10"),
+	forecastTomorrowIcon: z.string().default("sun-cloud"),
+	forecastDay3Max: z.string().default("17"),
+	forecastDay3Min: z.string().default("8"),
+	forecastDay3Icon: z.string().default("cloud"),
+	forecastDay4Max: z.string().default("19"),
+	forecastDay4Min: z.string().default("10"),
+	forecastDay4Icon: z.string().default("rain"),
+});
 
 interface StarMeteoProps {
 	currentMax?: string;
@@ -230,7 +262,7 @@ function WeatherIcon({
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function StarMeteo({
+function StarMeteo({
 	currentMax = "23",
 	currentMin = "12",
 	currentIcon = "sun-cloud",
@@ -245,8 +277,8 @@ export default function StarMeteo({
 	forecastDay4Max = "19",
 	forecastDay4Min = "10",
 	forecastDay4Icon = "rain",
-	width = 800,
-	height = 480,
+	width = DEFAULT_IMAGE_WIDTH,
+	height = DEFAULT_IMAGE_HEIGHT,
 }: StarMeteoProps) {
 	const hour = Number.parseInt(time.split(":")[0], 10) || 12;
 	const period =
@@ -632,3 +664,31 @@ export default function StarMeteo({
 		</PreSatori>
 	);
 }
+
+export const definition: RecipeDefinition<
+	typeof paramsSchema,
+	typeof dataSchema
+> = {
+	meta: {
+		slug: "starmeteo",
+		title: "StarMeteo Weather Station",
+		description:
+			"A weather station inspired by the La Crosse Technology StarMeteo e-ink displays, rendering segmented text and 1-bit icons.",
+		published: true,
+		tags: ["tailwind", "weather", "retro", "live-data", "configurable"],
+		author: { name: "Antigravity", github: "" },
+		category: "display-components",
+		version: "0.1.0",
+		createdAt: "2026-06-15T00:00:00Z",
+		updatedAt: "2026-06-15T00:00:00Z",
+	},
+	paramsSchema,
+	dataSchema,
+	getData: async (params) => {
+		const data = await getStarMeteoDataInternal(params);
+		return data as z.infer<typeof dataSchema>;
+	},
+	Component: ({ width, height, data }) => (
+		<StarMeteo {...data} width={width} height={height} />
+	),
+};

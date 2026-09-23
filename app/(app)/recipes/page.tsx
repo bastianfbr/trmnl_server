@@ -1,17 +1,24 @@
 import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
-import { fetchRecipes } from "@/app/actions/mixup";
 import { PageTemplate } from "@/components/common/page-template";
+import { ScreenPreviewImage } from "@/components/common/screen-preview-image";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { type CatalogRecipe, listAllRecipes } from "@/lib/recipes/catalog";
 import {
 	DEFAULT_IMAGE_HEIGHT,
 	DEFAULT_IMAGE_WIDTH,
 } from "@/lib/recipes/constants";
-import type { Recipe } from "@/lib/types";
+import { buildBitmapPreviewSrc } from "@/lib/render/preview-image";
 
-const RecipeCard = ({ recipe }: { recipe: Recipe }) => {
+const RecipeCard = ({
+	recipe,
+	priority = false,
+}: {
+	recipe: CatalogRecipe;
+	priority?: boolean;
+}) => {
 	return (
 		<Link
 			key={recipe.slug}
@@ -24,17 +31,13 @@ const RecipeCard = ({ recipe }: { recipe: Recipe }) => {
 					aspectRatio: `${DEFAULT_IMAGE_WIDTH} / ${DEFAULT_IMAGE_HEIGHT}`,
 				}}
 			>
-				<picture>
-					<source srcSet={`/api/bitmap/${recipe.slug}.bmp`} type="image/bmp" />
-					<img
-						src={`/api/bitmap/${recipe.slug}.bmp`}
-						alt={`${recipe.name} preview`}
-						width={DEFAULT_IMAGE_WIDTH}
-						height={DEFAULT_IMAGE_HEIGHT}
-						className="absolute inset-0 h-full w-full object-cover"
-						style={{ imageRendering: "pixelated" }}
-					/>
-				</picture>
+				<ScreenPreviewImage
+					src={buildBitmapPreviewSrc(recipe.slug)}
+					alt={`${recipe.name} preview`}
+					loading={priority ? "eager" : "lazy"}
+					fetchPriority={priority ? "high" : "auto"}
+					className="absolute inset-0"
+				/>
 				<div className="absolute left-2 top-2 flex items-center gap-1">
 					<Badge
 						variant="secondary"
@@ -73,10 +76,8 @@ const RecipeCard = ({ recipe }: { recipe: Recipe }) => {
 					) : (
 						<span>—</span>
 					)}
-					{recipe.updated_at && (
-						<span className="tabular-nums">
-							{new Date(recipe.updated_at).toLocaleDateString()}
-						</span>
+					{recipe.version && (
+						<span className="tabular-nums">v{recipe.version}</span>
 					)}
 				</div>
 			</div>
@@ -131,7 +132,7 @@ const CategorySection = ({
 	recipes,
 }: {
 	category: string;
-	recipes: Recipe[];
+	recipes: CatalogRecipe[];
 }) => {
 	return (
 		<section key={category} className="space-y-4">
@@ -145,8 +146,8 @@ const CategorySection = ({
 				<div className="h-px flex-1 bg-border" />
 			</div>
 			<div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-				{recipes.map((recipe) => (
-					<RecipeCard key={recipe.slug} recipe={recipe} />
+				{recipes.map((recipe, index) => (
+					<RecipeCard key={recipe.slug} recipe={recipe} priority={index < 3} />
 				))}
 			</div>
 		</section>
@@ -154,7 +155,7 @@ const CategorySection = ({
 };
 
 async function RecipesGrid() {
-	const allRecipes = await fetchRecipes();
+	const allRecipes = await listAllRecipes();
 
 	const recipesByCategory = allRecipes.reduce(
 		(acc, recipe) => {
@@ -163,7 +164,7 @@ async function RecipesGrid() {
 			acc[category].push(recipe);
 			return acc;
 		},
-		{} as Record<string, Recipe[]>,
+		{} as Record<string, CatalogRecipe[]>,
 	);
 
 	const sortedCategories = Object.keys(recipesByCategory).sort();

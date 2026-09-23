@@ -1,12 +1,61 @@
-import { NextResponse } from "next/server";
+import { connection, NextResponse } from "next/server";
 import type { CustomError } from "@/lib/api/types";
 import { getCurrentUserId } from "@/lib/auth/get-user";
-import { db } from "@/lib/database/db";
+import {
+	withDeviceApiKey,
+	withExplicitUserScope,
+} from "@/lib/database/scoped-db";
 import { checkDbConnection } from "@/lib/database/utils";
-import { logError, logInfo } from "@/lib/logger";
+import {
+	DEFAULT_DEVICE_SCREEN,
+	DEVICE_SLEEP_REFRESH_SECONDS,
+} from "@/lib/device/defaults";
+import { createProvisionedDevice } from "@/lib/device/provisioning";
+import { logError, logInfo, logWarn } from "@/lib/logger";
+import {
+	type ModelStorageResolution,
+	resolveModelForStorage,
+} from "@/lib/trmnl/model-storage";
 import { generateApiKey, generateFriendlyId } from "@/utils/helpers";
 
+function logUnknownSetupModel(
+	modelResolution: ModelStorageResolution,
+	friendlyId: string,
+): void {
+	if (!modelResolution.reportedUnknown) return;
+
+	logWarn("Device setup reported unknown TRMNL model; using default model", {
+		source: "api/setup",
+		metadata: {
+			friendly_id: friendlyId,
+			reportedModel: modelResolution.reportedUnknown,
+			resolvedModel: modelResolution.resolvedModelName,
+			defaulted: modelResolution.defaulted,
+		},
+	});
+}
+
+async function resolveSetupUserId(
+	apiKey: string | null,
+): Promise<string | null> {
+	if (apiKey) {
+		const device = await withDeviceApiKey(apiKey, (scopedDb) =>
+			scopedDb
+				.selectFrom("devices")
+				.select("user_id")
+				.where("api_key", "=", apiKey)
+				.executeTakeFirst(),
+		);
+		if (device?.user_id) return device.user_id;
+	}
+
+	return getCurrentUserId();
+}
+
 export async function GET(request: Request) {
+	// Tell the cache-components prerender the route is request-scoped so it
+	// doesn't try to evaluate the body at build time and bail on header reads.
+	await connection();
 	try {
 		const macAddress = request.headers.get("ID")?.toUpperCase();
 		const apiKey = request.headers.get("Access-Token");
@@ -29,10 +78,10 @@ export async function GET(request: Request) {
 			);
 			return NextResponse.json(
 				{
-					status: 200,
+					status: 503,
 					message: "Device setup skipped",
 				},
-				{ status: 200 },
+				{ status: 503 },
 			);
 		}
 
@@ -48,14 +97,14 @@ export async function GET(request: Request) {
 			});
 			return NextResponse.json(
 				{
-					status: 404,
+					status: 400,
 					api_key: null,
 					friendly_id: null,
 					image_url: null,
 					message: "ID header is required",
 				},
-				{ status: 200 },
-			); // Status 200 for device compatibility
+				{ status: 400 },
+			);
 		}
 
 		// TRMNL API requires Model header
@@ -68,38 +117,66 @@ export async function GET(request: Request) {
 					image_url: null,
 					message: "Model header is required",
 				},
-				{ status: 200 },
-			); // Status 200 for device compatibility
+				{ status: 400 },
+			);
 		}
 
-		const currentUserId = await getCurrentUserId();
+		const currentUserId = await resolveSetupUserId(apiKey);
+		if (!currentUserId) {
+			logError("Refusing to set up an unowned device", {
+				source: "api/setup",
+				metadata: {
+					macAddress,
+					hasApiKey: Boolean(apiKey),
+					model,
+				},
+			});
+			return NextResponse.json(
+				{
+					status: 403,
+					api_key: null,
+					friendly_id: null,
+					image_url: null,
+					message: "Device setup requires an authenticated owner",
+				},
+				{ status: 403 },
+			);
+		}
 
 		// First check if the device exists by MAC address
-		const device = await db
-			.selectFrom("devices")
-			.selectAll()
-			.where("mac_address", "=", macAddress)
-			.executeTakeFirst();
+		const device = await withExplicitUserScope(currentUserId, (scopedDb) =>
+			scopedDb
+				.selectFrom("devices")
+				.selectAll()
+				.where("mac_address", "=", macAddress)
+				.executeTakeFirst(),
+		);
 
 		// If API key is provided and device not found by MAC, check if the API key exists
 		if (!device && apiKey) {
-			const deviceByApiKey = await db
-				.selectFrom("devices")
-				.selectAll()
-				.where("api_key", "=", apiKey)
-				.executeTakeFirst();
+			const deviceByApiKey = await withExplicitUserScope(
+				currentUserId,
+				(scopedDb) =>
+					scopedDb
+						.selectFrom("devices")
+						.selectAll()
+						.where("api_key", "=", apiKey)
+						.executeTakeFirst(),
+			);
 
 			if (deviceByApiKey) {
 				// Device found by API key, update its MAC address
 				try {
-					await db
-						.updateTable("devices")
-						.set({
-							mac_address: macAddress,
-							updated_at: new Date().toISOString(),
-						})
-						.where("friendly_id", "=", deviceByApiKey.friendly_id)
-						.execute();
+					await withExplicitUserScope(currentUserId, (scopedDb) =>
+						scopedDb
+							.updateTable("devices")
+							.set({
+								mac_address: macAddress,
+								updated_at: new Date().toISOString(),
+							})
+							.where("friendly_id", "=", deviceByApiKey.friendly_id)
+							.execute(),
+					);
 
 					logInfo("Updated device MAC address", {
 						source: "api/setup",
@@ -138,27 +215,6 @@ export async function GET(request: Request) {
 
 		// If device not found by MAC address or API key, create a new one
 		if (!device) {
-			if (!currentUserId) {
-				logError("Refusing to set up an unowned device", {
-					source: "api/setup",
-					metadata: {
-						macAddress,
-						hasApiKey: Boolean(apiKey),
-						model,
-					},
-				});
-				return NextResponse.json(
-					{
-						status: 403,
-						api_key: null,
-						friendly_id: null,
-						image_url: null,
-						message: "Device setup requires an authenticated owner",
-					},
-					{ status: 200 },
-				);
-			}
-
 			const friendly_id = generateFriendlyId(
 				macAddress,
 				new Date().toISOString().replace(/[-:Z]/g, ""),
@@ -170,34 +226,23 @@ export async function GET(request: Request) {
 					macAddress,
 					new Date().toISOString().replace(/[-:Z]/g, ""),
 				);
+			const modelResolution = await resolveModelForStorage(model);
 
 			try {
-				const newDevice = await db
-					.insertInto("devices")
-					.values({
-						mac_address: macAddress,
-						name: `TRMNL Device ${friendly_id}`,
-						friendly_id: friendly_id,
-						api_key: api_key,
-						refresh_schedule: JSON.stringify({
-							default_refresh_rate: 60, // Default refresh rate in seconds
-							time_ranges: [
-								{
-									start_time: "00:00", // Start of the time range
-									end_time: "07:00", // End of the time range
-									refresh_rate: 3600, // Refresh rate in seconds
-								},
-							],
+				const newDevice = await withExplicitUserScope(
+					currentUserId,
+					(scopedDb) =>
+						createProvisionedDevice(scopedDb, {
+							macAddress,
+							name: `TRMNL Device ${friendly_id}`,
+							friendlyId: friendly_id,
+							apiKey: api_key,
+							userId: currentUserId,
+							nextExpectedRefreshSeconds: DEVICE_SLEEP_REFRESH_SECONDS,
+							screen: DEFAULT_DEVICE_SCREEN,
+							model: modelResolution.modelName ?? null,
 						}),
-						last_update_time: new Date().toISOString(), // Current time as last update
-						next_expected_update: new Date(
-							Date.now() + 3600 * 1000,
-						).toISOString(), // 1 hour from now
-						timezone: "Europe/London", // Default timezone
-						user_id: currentUserId,
-					})
-					.returningAll()
-					.executeTakeFirst();
+				);
 
 				if (!newDevice) {
 					throw new Error("Failed to create new device record");
@@ -211,6 +256,7 @@ export async function GET(request: Request) {
 						has_api_key: Boolean(api_key),
 					},
 				});
+				logUnknownSetupModel(modelResolution, newDevice.friendly_id);
 				return NextResponse.json(
 					{
 						status: 200,
@@ -239,7 +285,7 @@ export async function GET(request: Request) {
 						reset_firmware: false,
 						message: `Error creating new device. ${friendly_id}`,
 					},
-					{ status: 200 },
+					{ status: 500 },
 				);
 			}
 		}
@@ -271,20 +317,22 @@ export async function GET(request: Request) {
 					message:
 						"Device setup requires a valid access token or owner session",
 				},
-				{ status: 200 },
+				{ status: 403 },
 			);
 		}
 
 		if (apiKey && apiKey !== device.api_key) {
 			try {
-				await db
-					.updateTable("devices")
-					.set({
-						api_key: apiKey,
-						updated_at: new Date().toISOString(),
-					})
-					.where("friendly_id", "=", device.friendly_id)
-					.execute();
+				await withExplicitUserScope(currentUserId, (scopedDb) =>
+					scopedDb
+						.updateTable("devices")
+						.set({
+							api_key: apiKey,
+							updated_at: new Date().toISOString(),
+						})
+						.where("friendly_id", "=", device.friendly_id)
+						.execute(),
+				);
 
 				logInfo("Updated API key for device", {
 					source: "api/setup",
@@ -336,7 +384,7 @@ export async function GET(request: Request) {
 				status: 500,
 				error: "Internal server error",
 			},
-			{ status: 200 },
+			{ status: 500 },
 		);
 	}
 }
