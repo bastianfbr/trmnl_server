@@ -93,6 +93,15 @@ Local-only customizations that a merge may need to reconcile (keep this list cur
 
 After merging, always re-run `pnpm generate:sql`, `pnpm generate:recipes`, `pnpm typecheck`, `pnpm lint`, and `pnpm build` before trusting the result, and check `migrations/` for new files that need applying against the live database (via the in-app "Initialize" button) before deploying.
 
+**Never squash-merge an upstream sync PR into `main`** — use a regular merge commit. A squash drops the upstream commit chain, so `git merge-base main upstream/main` stops finding anything and the next sync turns back into add/add conflicts on every file. (Squash is fine for ordinary feature PRs that don't carry upstream history.)
+
+## Deployment (this fork)
+
+- Production: Vercel project `byos_next` (team `bastianfbrs-projects`), served at https://trmnlbadmax.vercel.app/. The Vercel production branch is `main` — merging to `main` is what deploys. The app version shown bottom-left of the dashboard confirms what's live.
+- Database: Neon Postgres. **The local `.env` `DATABASE_URL` points at the production Neon DB** (3 real devices live on it) — `pnpm dev` locally reads/writes prod data. Apply new migrations there (in-app "Initialize" button) *before* merging code that depends on them, or prod will 500.
+- Git remotes: `origin` = `bastianfbr/trmnl_server` (push here), `upstream` = `usetrmnl/byos_next`. A stale `bastianfbr` remote still points at the old `bastianfbr/byos_next.git` name — ignore it.
+- GitHub CLI: `gh` is authenticated as `bastianfbr`; PR CI runs Jest unit tests (see the `models.json` note above — the most common cause of a red check).
+
 ## Notable non-obvious conventions
 
 - Route-group folder names (`(app)`, `(auth)`, `(render)`) are load-bearing for layout scoping — don't flatten them.
