@@ -6,6 +6,7 @@ import {
 } from "@/lib/device/device-profile-request";
 import {
 	parseRequestHeaders,
+	resolveBatteryVoltageFromApiKey,
 	resolveUserIdFromApiKey,
 } from "@/lib/device/request-headers";
 import {
@@ -73,6 +74,12 @@ export async function GET(
 		const oversized = rejectOversizedImageArea(imageWidth, imageHeight);
 		if (oversized) return oversized;
 
+		// Only device requests carry an API key; previews leave it undefined so
+		// recipes can show a sample level.
+		const batteryVoltage = headers.apiKey
+			? await resolveBatteryVoltageFromApiKey(headers.apiKey).catch(() => null)
+			: undefined;
+
 		const image = await renderRecipeForDevice({
 			slug: recipeSlug,
 			profile,
@@ -80,6 +87,7 @@ export async function GET(
 			height: imageHeight,
 			userId,
 			cookies: cookieHeader || undefined,
+			batteryVoltage,
 		});
 
 		if (!image?.buffer.length) {

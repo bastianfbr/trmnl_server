@@ -5,6 +5,7 @@ import {
 	DEFAULT_IMAGE_WIDTH,
 } from "@/lib/recipes/constants";
 import type { RecipeDefinition } from "@/lib/recipes/types";
+import { estimateBatteryLife } from "@/utils/helpers";
 import { PreSatori } from "@/utils/pre-satori";
 import getStarMeteoDataInternal from "./getData";
 
@@ -48,6 +49,8 @@ interface StarMeteoProps {
 	forecastDay4Max?: string;
 	forecastDay4Min?: string;
 	forecastDay4Icon?: string;
+	/** 0–100, or null to hide the battery indicator. */
+	batteryPercent?: number | null;
 	width?: number;
 	height?: number;
 }
@@ -262,6 +265,59 @@ function WeatherIcon({
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+const BATTERY_BARS = 4;
+
+function BatteryIndicator({ percent }: { percent: number }) {
+	const lit = Math.ceil((percent / 100) * BATTERY_BARS);
+	const low = percent < 20;
+	const BW = 72;
+	const BH = 34;
+	const barW = (BW - 14) / BATTERY_BARS;
+	return (
+		<div
+			style={{
+				display: "flex",
+				flexDirection: "column",
+				alignItems: "center",
+				gap: 6,
+			}}
+		>
+			<svg width={BW + 5} height={BH} viewBox={`0 0 ${BW + 5} ${BH}`}>
+				<title>Batterie</title>
+				<rect
+					x="1.5"
+					y="1.5"
+					width={BW - 3}
+					height={BH - 3}
+					rx="4"
+					fill={low ? "#000" : "#fff"}
+					stroke="#000"
+					strokeWidth="3"
+				/>
+				<rect
+					x={BW - 1}
+					y={BH / 2 - 5}
+					width="4"
+					height="10"
+					rx="1"
+					fill="#000"
+				/>
+				{Array.from({ length: BATTERY_BARS }, (_, i) => (
+					<rect
+						key={i}
+						x={5 + i * barW + 1}
+						y="5"
+						width={barW - 3}
+						height={BH - 10}
+						fill={i < lit ? (low ? "#fff" : "#000") : "none"}
+					/>
+				))}
+			</svg>
+			<span style={{ fontSize: 22, fontWeight: "900" }}>{`${percent}%`}</span>
+		</div>
+	);
+}
+
 function StarMeteo({
 	currentMax = "23",
 	currentMin = "12",
@@ -277,6 +333,7 @@ function StarMeteo({
 	forecastDay4Max = "19",
 	forecastDay4Min = "10",
 	forecastDay4Icon = "rain",
+	batteryPercent = null,
 	width = DEFAULT_IMAGE_WIDTH,
 	height = DEFAULT_IMAGE_HEIGHT,
 }: StarMeteoProps) {
@@ -564,6 +621,7 @@ function StarMeteo({
 				<div
 					className="flex flex-row items-center justify-between"
 					style={{
+						position: "relative",
 						height: MID_H,
 						width: W,
 						paddingLeft: 8,
@@ -574,6 +632,22 @@ function StarMeteo({
 					<div className="flex items-center">
 						<SevenSegment value={time} size={96} />
 					</div>
+					{batteryPercent !== null && (
+						<div
+							style={{
+								position: "absolute",
+								top: 0,
+								bottom: 0,
+								left: 80,
+								right: 0,
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "center",
+							}}
+						>
+							<BatteryIndicator percent={batteryPercent} />
+						</div>
+					)}
 					<div className="flex flex-row items-center" style={{ gap: 4 }}>
 						<SevenSegment value={probeTemp} size={96} />
 						<span
@@ -665,6 +739,20 @@ function StarMeteo({
 	);
 }
 
+// No `device` = preview outside a device request → show a sample level so the
+// layout can be reviewed. A device with no voltage on record hides the gauge.
+const SAMPLE_BATTERY_PERCENT = 62;
+
+function batteryPercentFor(device?: {
+	batteryVoltage: number | null;
+}): number | null {
+	if (!device) return SAMPLE_BATTERY_PERCENT;
+	if (device.batteryVoltage === null) return null;
+	return Math.round(
+		estimateBatteryLife(device.batteryVoltage, 10).batteryPercentage,
+	);
+}
+
 export const definition: RecipeDefinition<
 	typeof paramsSchema,
 	typeof dataSchema
@@ -688,7 +776,12 @@ export const definition: RecipeDefinition<
 		const data = await getStarMeteoDataInternal(params);
 		return data as z.infer<typeof dataSchema>;
 	},
-	Component: ({ width, height, data }) => (
-		<StarMeteo {...data} width={width} height={height} />
+	Component: ({ width, height, data, device }) => (
+		<StarMeteo
+			{...data}
+			width={width}
+			height={height}
+			batteryPercent={batteryPercentFor(device)}
+		/>
 	),
 };
