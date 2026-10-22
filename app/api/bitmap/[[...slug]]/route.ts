@@ -74,11 +74,15 @@ export async function GET(
 		const oversized = rejectOversizedImageArea(imageWidth, imageHeight);
 		if (oversized) return oversized;
 
-		// Previews (`preview=1`) leave the battery undefined so recipes show a
-		// sample level. Device requests with no usable API key get `null` (gauge
-		// hidden) rather than a fake value.
+		// Order: `battery` carried in the URL by /api/display (firmware doesn't
+		// replay headers on the image fetch), then dashboard previews
+		// (`preview=1`, undefined → recipes show a sample), then an API key if
+		// present. Otherwise `null` hides the gauge rather than faking a value.
+		const urlBattery = Number.parseFloat(searchParams.get("battery") ?? "");
 		let batteryVoltage: number | null | undefined;
-		if (searchParams.get("preview") === "1") {
+		if (Number.isFinite(urlBattery) && urlBattery > 2 && urlBattery < 5.5) {
+			batteryVoltage = urlBattery;
+		} else if (searchParams.get("preview") === "1") {
 			batteryVoltage = undefined;
 		} else if (headers.apiKey) {
 			batteryVoltage = await resolveBatteryVoltageFromApiKey(
@@ -87,7 +91,7 @@ export async function GET(
 		} else {
 			batteryVoltage = null;
 			logger.info(
-				`Battery unavailable for ${recipeSlug}: no Access-Token on bitmap request`,
+				`Battery unavailable for ${recipeSlug}: no battery param or Access-Token`,
 			);
 		}
 
