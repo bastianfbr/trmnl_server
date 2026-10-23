@@ -89,6 +89,7 @@ export async function GET(request: Request) {
 			hostUrl: headers.hostUrl,
 			width: headers.width,
 			height: headers.height,
+			batteryVoltage: headers.batteryVoltage,
 		});
 
 		let { screen: screenToDisplay, imageUrl } = selection;

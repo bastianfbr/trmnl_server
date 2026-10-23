@@ -61,3 +61,23 @@ export async function resolveUserIdFromApiKey(
 
 	return device?.user_id ?? null;
 }
+
+export async function resolveBatteryVoltageFromApiKey(
+	apiKey: string | null,
+): Promise<number | null> {
+	if (!apiKey) return null;
+
+	const { ready } = await checkDbConnection();
+	if (!ready) return null;
+
+	const device = await withDeviceApiKey(apiKey, (scopedDb) =>
+		scopedDb
+			.selectFrom("devices")
+			.select("battery_voltage")
+			.where("api_key", "=", apiKey)
+			.executeTakeFirst(),
+	);
+
+	const voltage = device?.battery_voltage;
+	return voltage === null || voltage === undefined ? null : Number(voltage);
+}

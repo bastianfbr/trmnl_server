@@ -6,6 +6,7 @@ import {
 } from "@/lib/device/device-profile-request";
 import {
 	parseRequestHeaders,
+	resolveBatteryVoltageFromApiKey,
 	resolveUserIdFromApiKey,
 } from "@/lib/device/request-headers";
 import {
@@ -73,6 +74,27 @@ export async function GET(
 		const oversized = rejectOversizedImageArea(imageWidth, imageHeight);
 		if (oversized) return oversized;
 
+		// Order: `battery` carried in the URL by /api/display (firmware doesn't
+		// replay headers on the image fetch), then dashboard previews
+		// (`preview=1`, undefined → recipes show a sample), then an API key if
+		// present. Otherwise `null` hides the gauge rather than faking a value.
+		const urlBattery = Number.parseFloat(searchParams.get("battery") ?? "");
+		let batteryVoltage: number | null | undefined;
+		if (Number.isFinite(urlBattery) && urlBattery > 2 && urlBattery < 5.5) {
+			batteryVoltage = urlBattery;
+		} else if (searchParams.get("preview") === "1") {
+			batteryVoltage = undefined;
+		} else if (headers.apiKey) {
+			batteryVoltage = await resolveBatteryVoltageFromApiKey(
+				headers.apiKey,
+			).catch(() => null);
+		} else {
+			batteryVoltage = null;
+			logger.info(
+				`Battery unavailable for ${recipeSlug}: no battery param or Access-Token`,
+			);
+		}
+
 		const image = await renderRecipeForDevice({
 			slug: recipeSlug,
 			profile,
@@ -80,6 +102,7 @@ export async function GET(
 			height: imageHeight,
 			userId,
 			cookies: cookieHeader || undefined,
+			batteryVoltage,
 		});
 
 		if (!image?.buffer.length) {

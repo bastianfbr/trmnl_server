@@ -40,6 +40,7 @@ type RenderRecipeArgs = {
 	palette?: TrmnlPalette | null;
 	paletteId?: string | null;
 	deviceProfile?: DeviceProfile | null;
+	batteryVoltage?: number | null;
 };
 
 /**
@@ -55,6 +56,7 @@ export async function renderRecipeToImage({
 	palette,
 	paletteId,
 	deviceProfile,
+	batteryVoltage,
 }: RenderRecipeArgs): Promise<RasterizeResults> {
 	const profile =
 		deviceProfile ?? (model ? { model, palette: palette ?? null } : null);
@@ -75,6 +77,7 @@ export async function renderRecipeToImage({
 			screen,
 			params,
 			data,
+			device: batteryVoltage === undefined ? undefined : { batteryVoltage },
 		});
 		return rasterize({
 			slug,
@@ -122,6 +125,7 @@ export async function renderRecipeForDevice({
 	height,
 	userId,
 	cookies,
+	batteryVoltage,
 }: {
 	slug: string;
 	profile: DeviceProfile;
@@ -129,6 +133,7 @@ export async function renderRecipeForDevice({
 	height?: number;
 	userId?: string | null;
 	cookies?: string;
+	batteryVoltage?: number | null;
 }): Promise<RenderDeviceImageResult | null> {
 	const renderProfile =
 		width !== undefined || height !== undefined
@@ -150,6 +155,7 @@ export async function renderRecipeForDevice({
 		model: profile.model,
 		palette: profile.palette,
 		paletteId: renderProfile.palette?.id ?? null,
+		batteryVoltage,
 	});
 
 	if (!renders.png) return null;

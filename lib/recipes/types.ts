@@ -41,6 +41,12 @@ export type RecipeRenderProps = {
 	width?: number;
 	height?: number;
 	screen?: ScreenProfile;
+	/**
+	 * Telemetry of the device the image is rendered for. Absent for previews
+	 * that aren't tied to a device; `batteryVoltage: null` means a device
+	 * request with no reading on record.
+	 */
+	device?: { batteryVoltage: number | null };
 };
 
 /**

@@ -25,6 +25,8 @@ type RequestHints = {
 	hostUrl: string;
 	width?: number | null;
 	height?: number | null;
+	/** Raw `Battery-Voltage` header from the device's /api/display call. */
+	batteryVoltage?: string | null;
 };
 
 export type DisplaySelection = {
@@ -87,6 +89,12 @@ export async function selectDisplayForDevice(
 	}
 	if (profile.palette?.id) {
 		params.set("palette_id", profile.palette.id);
+	}
+	// Firmware doesn't replay its headers when downloading the image, so carry
+	// the battery reading in the URL for recipes that display it.
+	const battery = Number.parseFloat(hints.batteryVoltage ?? "");
+	if (Number.isFinite(battery)) {
+		params.set("battery", String(battery));
 	}
 	const baseQueryParams = params.toString();
 

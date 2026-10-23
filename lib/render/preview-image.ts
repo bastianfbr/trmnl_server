@@ -23,6 +23,9 @@ type DevicePreviewInput = DeviceProfileInput &
 	Pick<Device, "screen" | "display_mode" | "mixup_id">;
 
 function bitmapUrl(path: string, params: URLSearchParams): string {
+	// Marks dashboard previews so recipes may show sample telemetry (battery)
+	// instead of hiding it; real device URLs never carry this flag.
+	params.set("preview", "1");
 	return `/api/bitmap/${path}.png?${params.toString()}`;
 }
 
