@@ -11,7 +11,7 @@ const META_THEME_COLORS = {
 	dark: "#09090b",
 };
 
-const APP_NAME = "TRMNL BYOS";
+const APP_NAME = "TRMNL";
 const APP_DESCRIPTION =
 	"Self-hosted server and device management dashboard for TRMNL e-ink displays.";
 
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
 	manifest: "/manifest.webmanifest",
 	appleWebApp: {
 		capable: true,
-		title: "TRMNL",
+		title: APP_NAME,
 		statusBarStyle: "black-translucent",
 	},
 	formatDetection: { telephone: false },
