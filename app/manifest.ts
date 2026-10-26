@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
 	return {
-		name: "TRMNL BYOS",
-		short_name: "BYOS",
+		name: "TRMNL",
+		short_name: "TRMNL",
 		description:
 			"Self-hosted server and device management dashboard for TRMNL e-ink displays.",
 		start_url: "/",
