@@ -47,7 +47,7 @@ export const metadata: Metadata = {
 	manifest: "/manifest.webmanifest",
 	appleWebApp: {
 		capable: true,
-		title: APP_NAME,
+		title: "TRMNL",
 		statusBarStyle: "black-translucent",
 	},
 	formatDetection: { telephone: false },
