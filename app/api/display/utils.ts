@@ -251,6 +251,9 @@ function logUnknownReportedModel(
 	deviceId: string,
 ): void {
 	if (!modelResolution.reportedUnknown) return;
+	// The stored model is kept and works fine; firmware that reports a marketing
+	// name (e.g. "reTerminal E1001") would otherwise warn on every refresh.
+	if (modelResolution.preservedExisting) return;
 
 	logWarn("Device reported unknown TRMNL model; using stored/default model", {
 		source: "api/display",
@@ -545,6 +548,8 @@ export const buildClaimResponse = (
 	);
 };
 
+const ERROR_RETRY_REFRESH_SECONDS = 60;
+
 export const buildErrorResponse = (
 	message: string,
 	baseUrl: string,
@@ -560,6 +565,9 @@ export const buildErrorResponse = (
 			message,
 			image_url: errorImageUrl,
 			filename: `error_${uniqueId}.png`,
+			// Without a refresh_rate the firmware may fall back to Wi-Fi setup;
+			// ask it to simply retry soon instead.
+			refresh_rate: ERROR_RETRY_REFRESH_SECONDS,
 		},
 		{ status: 200 },
 	);

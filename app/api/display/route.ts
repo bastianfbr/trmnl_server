@@ -64,7 +64,13 @@ export async function GET(request: Request) {
 	});
 
 	try {
-		const lookup = await findOrCreateDevice(headers);
+		let lookup = await findOrCreateDevice(headers);
+		if (!lookup.device && !lookup.claimCode) {
+			// A transient lookup miss (cold DB connection) would otherwise try to
+			// re-create an existing device and fail on RLS; retry once.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			lookup = await findOrCreateDevice(headers);
+		}
 		const { device } = lookup;
 
 		if (!device) {
