@@ -266,7 +266,9 @@ export function estimateBatteryLife(
 	// Battery voltage range (adjust based on real battery discharge curve if needed)
 	const V_CHARGING = 4.6; // Charging voltage
 	const V_MAX = 4.2; // Fully charged
-	const V_MIN = 3.6; // Cutoff voltage
+	// Floor tuned for the reTerminal E1001: the ESP32 reads the battery with
+	// Wi-Fi on, which drops the voltage under load, so 3.6V would underestimate.
+	const V_MIN = 3.45;
 
 	// Estimate battery percentage (linear approximation)
 	const batteryPercentage = Math.max(
