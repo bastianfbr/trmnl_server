@@ -716,14 +716,19 @@ describe("estimateBatteryLife", () => {
 		expect(batteryPercentage).toBe(100);
 	});
 
-	it("returns 0% at min voltage (3.6V)", () => {
-		const { batteryPercentage } = estimateBatteryLife(3.6, 10);
+	it("returns 0% at min voltage (3.45V)", () => {
+		const { batteryPercentage } = estimateBatteryLife(3.45, 10);
 		expect(batteryPercentage).toBe(0);
 	});
 
-	it("returns ~50% at mid voltage (3.9V)", () => {
-		const { batteryPercentage } = estimateBatteryLife(3.9, 10);
+	it("returns ~50% at mid voltage (3.825V)", () => {
+		const { batteryPercentage } = estimateBatteryLife(3.825, 10);
 		expect(batteryPercentage).toBeCloseTo(50, 1);
+	});
+
+	it("estimates ~34.7% at 3.71V (Wi-Fi-loaded E1001 reading)", () => {
+		const { batteryPercentage } = estimateBatteryLife(3.71, 10);
+		expect(batteryPercentage).toBeCloseTo(34.67, 1);
 	});
 
 	it("clamps percentage to 0 below min voltage", () => {
@@ -751,7 +756,7 @@ describe("estimateBatteryLife", () => {
 	});
 
 	it("returns 0 remaining days at 0% battery", () => {
-		const { remainingDays } = estimateBatteryLife(3.6, 10);
+		const { remainingDays } = estimateBatteryLife(3.45, 10);
 		expect(remainingDays).toBe(0);
 	});
 
