@@ -711,27 +711,42 @@ describe("formatTimezone", () => {
 // ---------------------------------------------------------------------------
 
 describe("estimateBatteryLife", () => {
-	it("returns 100% at max voltage (4.2V)", () => {
-		const { batteryPercentage } = estimateBatteryLife(4.2, 10);
-		expect(batteryPercentage).toBe(100);
+	it("returns 100% at and above the top of the curve (4.15V)", () => {
+		expect(estimateBatteryLife(4.15, 10).batteryPercentage).toBe(100);
+		expect(estimateBatteryLife(4.2, 10).batteryPercentage).toBe(100);
 	});
 
-	it("returns 0% at min voltage (3.45V)", () => {
-		const { batteryPercentage } = estimateBatteryLife(3.45, 10);
-		expect(batteryPercentage).toBe(0);
+	it("returns 0% at the bottom of the curve (3.27V)", () => {
+		expect(estimateBatteryLife(3.27, 10).batteryPercentage).toBe(0);
 	});
 
-	it("returns ~50% at mid voltage (3.825V)", () => {
-		const { batteryPercentage } = estimateBatteryLife(3.825, 10);
-		expect(batteryPercentage).toBeCloseTo(50, 1);
+	it("hits the E1001 calibration points exactly", () => {
+		const points: Array<[number, number]> = [
+			[3.3, 5],
+			[3.41, 10],
+			[3.49, 20],
+			[3.58, 30],
+			[3.68, 40],
+			[3.75, 50],
+			[3.8, 60],
+			[3.85, 70],
+			[3.91, 80],
+			[3.96, 90],
+		];
+		for (const [voltage, percent] of points) {
+			expect(estimateBatteryLife(voltage, 10).batteryPercentage).toBeCloseTo(
+				percent,
+				1,
+			);
+		}
 	});
 
-	it("estimates ~34.7% at 3.71V (Wi-Fi-loaded E1001 reading)", () => {
+	it("interpolates linearly between points (3.71V ~ 44.3%)", () => {
 		const { batteryPercentage } = estimateBatteryLife(3.71, 10);
-		expect(batteryPercentage).toBeCloseTo(34.67, 1);
+		expect(batteryPercentage).toBeCloseTo(44.29, 1);
 	});
 
-	it("clamps percentage to 0 below min voltage", () => {
+	it("clamps percentage to 0 below the curve", () => {
 		const { batteryPercentage } = estimateBatteryLife(3.0, 10);
 		expect(batteryPercentage).toBe(0);
 	});
@@ -756,7 +771,7 @@ describe("estimateBatteryLife", () => {
 	});
 
 	it("returns 0 remaining days at 0% battery", () => {
-		const { remainingDays } = estimateBatteryLife(3.45, 10);
+		const { remainingDays } = estimateBatteryLife(3.27, 10);
 		expect(remainingDays).toBe(0);
 	});
 

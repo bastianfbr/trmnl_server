@@ -258,22 +258,49 @@ export const formatTimezone = (timezone: string): string => {
 	return found ? found.label : timezone;
 };
 
+// Discharge curve of the Seeed reTerminal E1001 (from the vendor's ESPHome
+// `calibrate_linear` config), as [voltage, percent] points sorted by voltage.
+// It accounts for the voltage sag when the ESP32 reads the battery with Wi-Fi on.
+const BATTERY_CURVE: ReadonlyArray<readonly [number, number]> = [
+	[3.27, 0],
+	[3.3, 5],
+	[3.41, 10],
+	[3.49, 20],
+	[3.58, 30],
+	[3.68, 40],
+	[3.75, 50],
+	[3.8, 60],
+	[3.85, 70],
+	[3.91, 80],
+	[3.96, 90],
+	[4.15, 100],
+];
+
+function batteryVoltageToPercent(voltage: number): number {
+	const first = BATTERY_CURVE[0];
+	const last = BATTERY_CURVE[BATTERY_CURVE.length - 1];
+	if (voltage <= first[0]) return first[1];
+	if (voltage >= last[0]) return last[1];
+	for (let i = 1; i < BATTERY_CURVE.length; i++) {
+		const [v1, p1] = BATTERY_CURVE[i];
+		if (voltage <= v1) {
+			const [v0, p0] = BATTERY_CURVE[i - 1];
+			return p0 + ((voltage - v0) / (v1 - v0)) * (p1 - p0);
+		}
+	}
+	return last[1];
+}
+
 export function estimateBatteryLife(
 	batteryVoltage: number,
 	refreshPerDay: number,
 	batteryCapacity = 1800, // use 2500mAh if you have battery upgrade
 ): { batteryPercentage: number; remainingDays: number; isCharging: boolean } {
-	// Battery voltage range (adjust based on real battery discharge curve if needed)
 	const V_CHARGING = 4.6; // Charging voltage
-	const V_MAX = 4.2; // Fully charged
-	// Floor tuned for the reTerminal E1001: the ESP32 reads the battery with
-	// Wi-Fi on, which drops the voltage under load, so 3.6V would underestimate.
-	const V_MIN = 3.45;
 
-	// Estimate battery percentage (linear approximation)
 	const batteryPercentage = Math.max(
 		0,
-		Math.min(100, ((batteryVoltage - V_MIN) / (V_MAX - V_MIN)) * 100),
+		Math.min(100, batteryVoltageToPercent(batteryVoltage)),
 	);
 
 	// Power consumption rates
