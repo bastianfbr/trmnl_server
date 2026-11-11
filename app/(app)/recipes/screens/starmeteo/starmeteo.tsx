@@ -266,10 +266,12 @@ function WeatherIcon({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 const BATTERY_BARS = 4;
+// At or below this level the gauge shows "LOW" under the battery.
+const LOW_BATTERY_PERCENT = 25;
 
 function BatteryIndicator({ percent }: { percent: number }) {
 	const lit = Math.ceil((percent / 100) * BATTERY_BARS);
-	const low = percent < 20;
+	const low = percent <= LOW_BATTERY_PERCENT;
 	const BW = 72;
 	const BH = 34;
 	const barW = (BW - 14) / BATTERY_BARS;
@@ -290,7 +292,7 @@ function BatteryIndicator({ percent }: { percent: number }) {
 					width={BW - 3}
 					height={BH - 3}
 					rx="4"
-					fill={low ? "#000" : "#fff"}
+					fill="#fff"
 					stroke="#000"
 					strokeWidth="3"
 				/>
@@ -309,11 +311,15 @@ function BatteryIndicator({ percent }: { percent: number }) {
 						y="5"
 						width={barW - 3}
 						height={BH - 10}
-						fill={i < lit ? (low ? "#fff" : "#000") : "none"}
+						fill={i < lit ? "#000" : "none"}
 					/>
 				))}
 			</svg>
-			<span style={{ fontSize: 22, fontWeight: "900" }}>{`${percent}%`}</span>
+			{low && (
+				<span style={{ fontSize: 26, fontWeight: "900", letterSpacing: 3 }}>
+					LOW
+				</span>
+			)}
 		</div>
 	);
 }
